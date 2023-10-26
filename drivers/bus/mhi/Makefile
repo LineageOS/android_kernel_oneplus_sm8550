@@ -1,4 +1,8 @@
 # Host MHI stack
 obj-y += host/
-obj-y += controllers/
+
+# MHI Devices stack
 obj-y += devices/
+
+#MHI Controller stack
+obj-y += controllers/

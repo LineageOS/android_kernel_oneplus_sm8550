@@ -2638,7 +2638,7 @@ static int stop_rx_sequencer(struct uart_port *uport)
 			UART_LOG_DBG(port->ipc_log_misc, uport->dev, "%s: Interrupt delay\n",
 					__func__);
 			handle_rx_dma_xfer(s_irq_status, uport);
-			if (!port->ioctl_count) {
+			if (pm_runtime_enabled(uport->dev) && !port->ioctl_count) {
 				usage_count = atomic_read(&uport->dev->power.usage_count);
 				UART_LOG_DBG(port->ipc_log_misc, uport->dev,
 					"%s: Abort Stop Rx, extend the PM timer, usage_count:%d\n",
@@ -3083,10 +3083,10 @@ static int msm_geni_serial_handle_dma_rx(struct uart_port *uport, bool drop_rx)
 		while (rx_bytes) {
 			/*
 			 * Allocation in tty layer can fail due to higher order page
-			 * request, hence try copying in chunks of 512 bytes which will
+			 * request, hence try copying in chunks of 256 bytes which will
 			 * use zero order pages.
 			 */
-			cnt = rx_bytes < 512 ? rx_bytes : 512;
+			cnt = rx_bytes < 256 ? rx_bytes : 256;
 			UART_LOG_DBG(msm_port->ipc_log_rx, uport->dev,
 				     "%s: To copy %d, try copying %d\n", __func__, rx_bytes, cnt);
 			ret = tty_insert_flip_string(tport, &rx_buf[offset], cnt);
@@ -3910,9 +3910,11 @@ static void msm_geni_serial_termios_cfg(struct uart_port *uport,
 	if (termios->c_cflag & CRTSCTS) {
 		tx_trans_cfg &= ~UART_CTS_MASK;
 		uport->status |= UPSTAT_AUTOCTS;
+		msm_geni_serial_set_manual_flow(true, port);
 	} else {
 		tx_trans_cfg |= UART_CTS_MASK;
-	/* status bits to ignore */
+		msm_geni_serial_set_manual_flow(false, port);
+		/* status bits to ignore */
 	}
 
 	if (port->gsi_mode) {
