@@ -71,6 +71,9 @@
 	(sizeof(struct virt_fastrpc_mapping) + \
 		nents * sizeof(struct virt_fastrpc_sgl))
 
+/* Max value of unique fastrpc tgid */
+#define MAX_FRPC_TGID 65
+
 enum virtio_fastrpc_invoke_attr {
 	/* bit0, 1: FE/BE crc enabled, 0: FE/BE crc disabled */
 	VIRTIO_FASTRPC_INVOKE_CRC = 1 << 0,
@@ -91,6 +94,9 @@ static uint32_t kernel_capabilities[FASTRPC_MAX_ATTRIBUTES -
 FASTRPC_MAX_DSP_ATTRIBUTES] = {
 	PERF_CAPABILITY	/* PERF_LOGGING_V2_SUPPORT feature is supported, unsupported = 0 */
 };
+
+/* Array to keep track unique tgid_frpc usage */
+static bool frpc_tgid_usage_array[MAX_FRPC_TGID] = {0};
 
 struct virt_fastrpc_cmd {
 	struct hlist_node hn;
@@ -314,8 +320,11 @@ struct vfastrpc_file *vfastrpc_file_alloc(void)
 	fl->mode = FASTRPC_MODE_SERIAL;
 	vfl->domain = -1;
 	fl->cid = -1;
+	fl->tgid_frpc = -1;
 	fl->dsp_proc_init = 0;
 	fl->sessionid = 0;
+	fl->set_session_info = false;
+	fl->multi_session_support = false;
 	mutex_init(&fl->internal_map_mutex);
 	mutex_init(&fl->map_mutex);
 	return vfl;
@@ -495,10 +504,8 @@ static int virt_fastrpc_close(struct vfastrpc_file *vfl)
 	}
 
 	vmsg = (struct virt_msg_hdr *)msg->txbuf;
-	vmsg->pid = fl->tgid;
+	vmsg->pid = fl->tgid_frpc;
 	vmsg->tid = current->pid;
-	if (fl->sessionid)
-		vmsg->tid |= (1 << SESSION_ID_INDEX);
 	vmsg->cid = fl->cid;
 	vmsg->cmd = VIRTIO_FASTRPC_CMD_CLOSE;
 	vmsg->len = sizeof(*vmsg);
@@ -530,9 +537,12 @@ int vfastrpc_file_free(struct vfastrpc_file *vfl)
 	struct fastrpc_file *fl = vfl ? to_fastrpc_file(vfl) : NULL;
 	struct vfastrpc_mmap *map = NULL, *lmap = NULL;
 	unsigned long flags;
+	struct vfastrpc_apps *me = NULL;
 
 	if (!vfl || !fl)
 		return 0;
+
+	me = vfl->apps;
 
 	spin_lock(&fl->hlock);
 	fl->file_close = 1;
@@ -550,6 +560,12 @@ int vfastrpc_file_free(struct vfastrpc_file *vfl)
 	atomic_add(1, &fl->async_queue_job_count);
 	wake_up_interruptible(&fl->async_wait_queue);
 	spin_unlock_irqrestore(&fl->aqlock, flags);
+
+	spin_lock(&me->hlock);
+	/* Reset the tgid usage to false */
+	if (fl->tgid_frpc != -1)
+		frpc_tgid_usage_array[fl->tgid_frpc] = false;
+	spin_unlock(&me->hlock);
 
 	vfastrpc_context_list_dtor(vfl);
 	vfastrpc_cached_buf_list_free(vfl);
@@ -853,10 +869,8 @@ static int get_args(struct vfastrpc_invoke_ctx *ctx)
 
 	ctx->size = size;
 	vmsg = (struct virt_invoke_msg *)ctx->msg->txbuf;
-	vmsg->hdr.pid = fl->tgid;
+	vmsg->hdr.pid = fl->tgid_frpc;
 	vmsg->hdr.tid = current->pid;
-	if (fl->sessionid)
-		vmsg->hdr.tid |= (1 << SESSION_ID_INDEX);
 	vmsg->hdr.cid = fl->cid;
 	vmsg->hdr.cmd = VIRTIO_FASTRPC_CMD_INVOKE;
 	vmsg->hdr.len = size;
@@ -1367,12 +1381,68 @@ bail:
 	return err;
 }
 
+int vfastrpc_set_session_info(
+		struct fastrpc_proc_sess_info *sess_info,
+			void *param, struct vfastrpc_file *vfl)
+{
+	int err = 0;
+	struct fastrpc_file *fl = to_fastrpc_file(vfl);
+	struct vfastrpc_apps *me = vfl->apps;
+
+	if (fl->set_session_info) {
+		ADSPRPC_ERR("Set session info invoked multiple times\n");
+		err = -EBADR;
+		goto bail;
+	}
+	/*
+	 * Third-party apps don't have permission to open the fastrpc device, so
+	 * it is opened on their behalf by DSP HAL. This is detected by
+	 * comparing current PID with the one stored during device open.
+	 */
+	if (current->tgid != fl->tgid_open)
+		fl->untrusted_process = true;
+	VERIFY(err, sess_info->pd_type > DEFAULT_UNUSED &&
+		sess_info->pd_type < MAX_PD_TYPE);
+	if (err) {
+		ADSPRPC_ERR(
+		"Session PD type %u is invalid for the process\n",
+							sess_info->pd_type);
+		err = -EBADR;
+		goto bail;
+	}
+	if (fl->untrusted_process && sess_info->pd_type != USERPD) {
+		ADSPRPC_ERR(
+		"Session PD type %u not allowed for untrusted process\n",
+							sess_info->pd_type);
+		err = -EBADR;
+		goto bail;
+	}
+	if (sess_info->session_id >= me->max_sess_per_proc) {
+		ADSPRPC_ERR(
+		"Session ID %u cannot be beyond %u\n",
+			sess_info->session_id, me->max_sess_per_proc);
+		 err = -EBADR;
+		goto bail;
+	}
+	fl->sessionid = sess_info->session_id;
+	// Set multi_session_support, to disable old way of setting session_id
+	fl->multi_session_support = true;
+	VERIFY(err, 0 == (err = vfastrpc_internal_get_info(vfl, &(sess_info->domain_id))));
+	if (err)
+		goto bail;
+	K_COPY_TO_USER(err, 0, param, sess_info,
+		sizeof(struct fastrpc_proc_sess_info));
+bail:
+	return err;
+}
+
 int vfastrpc_internal_invoke2(struct vfastrpc_file *vfl,
 				struct fastrpc_ioctl_invoke2 *inv2)
 {
 	union {
 		struct fastrpc_ioctl_invoke_async inv;
 		struct fastrpc_ioctl_async_response async_res;
+		struct fastrpc_proc_sess_info sess_info;
 	} p;
 	struct fastrpc_dsp_capabilities *dsp_cap_ptr = NULL;
 	struct fastrpc_file *fl = to_fastrpc_file(vfl);
@@ -1423,6 +1493,20 @@ int vfastrpc_internal_invoke2(struct vfastrpc_file *vfl,
 	case FASTRPC_INVOKE2_KERNEL_OPTIMIZATIONS:
 		err = -ENOTTY;
 		break;
+	case FASTRPC_INVOKE2_SESS_INFO:
+		VERIFY(err,
+		sizeof(struct fastrpc_proc_sess_info) >= inv2->size);
+		if (err) {
+			err = -EBADE;
+			goto bail;
+		}
+		K_COPY_FROM_USER(err, fl->is_compat, &p.sess_info,
+		(void *)inv2->invparam, inv2->size);
+		if (err)
+			goto bail;
+		err = vfastrpc_set_session_info(&p.sess_info,
+				(void *)inv2->invparam, vfl);
+		break;
 	default:
 		err = -ENOTTY;
 		break;
@@ -1445,10 +1529,8 @@ static int virt_fastrpc_munmap(struct vfastrpc_file *vfl, uintptr_t raddr,
 		return -ENOMEM;
 
 	vmsg = (struct virt_munmap_msg *)msg->txbuf;
-	vmsg->hdr.pid = fl->tgid;
+	vmsg->hdr.pid = fl->tgid_frpc;
 	vmsg->hdr.tid = current->pid;
-	if (fl->sessionid)
-		vmsg->hdr.tid |= (1 << SESSION_ID_INDEX);
 	vmsg->hdr.cid = fl->cid;
 	vmsg->hdr.cmd = VIRTIO_FASTRPC_CMD_MUNMAP;
 	vmsg->hdr.len = sizeof(*vmsg);
@@ -1605,10 +1687,8 @@ static int virt_fastrpc_munmap_fd(struct vfastrpc_file *vfl,
 		return -ENOMEM;
 
 	vmsg = (struct virt_munmap_fd_msg *)msg->txbuf;
-	vmsg->hdr.pid = fl->tgid;
+	vmsg->hdr.pid = fl->tgid_frpc;
 	vmsg->hdr.tid = current->pid;
-	if (fl->sessionid)
-		vmsg->hdr.tid |= (1 << SESSION_ID_INDEX);
 	vmsg->hdr.cid = fl->cid;
 	vmsg->hdr.cmd = VIRTIO_FASTRPC_CMD_MUNMAP_FD;
 	vmsg->hdr.len = total_size;
@@ -1707,10 +1787,8 @@ static int virt_fastrpc_mmap(struct vfastrpc_file *vfl, uint32_t flags,
 		return -ENOMEM;
 
 	vmsg = (struct virt_mmap_msg *)msg->txbuf;
-	vmsg->hdr.pid = fl->tgid;
+	vmsg->hdr.pid = fl->tgid_frpc;
 	vmsg->hdr.tid = current->pid;
-	if (fl->sessionid)
-		vmsg->hdr.tid |= (1 << SESSION_ID_INDEX);
 	vmsg->hdr.cid = fl->cid;
 	vmsg->hdr.cmd = VIRTIO_FASTRPC_CMD_MMAP;
 	vmsg->hdr.len = total_size;
@@ -1858,7 +1936,7 @@ static int virt_fastrpc_mem_map(struct vfastrpc_file *vfl, s32 offset,
 		return -ENOMEM;
 
 	vmsg = (struct virt_mem_map_msg *)msg->txbuf;
-	vmsg->hdr.pid = fl->tgid;
+	vmsg->hdr.pid = fl->tgid_frpc;
 	vmsg->hdr.tid = current->pid;
 	vmsg->hdr.cid = fl->cid;
 	vmsg->hdr.cmd = VIRTIO_FASTRPC_CMD_MEM_MAP;
@@ -1968,7 +2046,7 @@ static int virt_fastrpc_mem_unmap(struct vfastrpc_file *vfl, int fd, u64 size,
 		return -ENOMEM;
 
 	vmsg = (struct virt_mem_unmap_msg *)msg->txbuf;
-	vmsg->hdr.pid = fl->tgid;
+	vmsg->hdr.pid = fl->tgid_frpc;
 	vmsg->hdr.tid = current->pid;
 	vmsg->hdr.cid = fl->cid;
 	vmsg->hdr.cmd = VIRTIO_FASTRPC_CMD_MEM_UNMAP;
@@ -2069,10 +2147,8 @@ static int virt_fastrpc_control(struct vfastrpc_file *vfl,
 		return -ENOMEM;
 
 	vmsg = (struct virt_control_msg *)msg->txbuf;
-	vmsg->hdr.pid = fl->tgid;
+	vmsg->hdr.pid = fl->tgid_frpc;
 	vmsg->hdr.tid = current->pid;
-	if (fl->sessionid)
-		vmsg->hdr.tid |= (1 << SESSION_ID_INDEX);
 	vmsg->hdr.cid = fl->cid;
 	vmsg->hdr.cmd = VIRTIO_FASTRPC_CMD_CONTROL;
 	vmsg->hdr.len = sizeof(*vmsg);
@@ -2134,6 +2210,25 @@ bail:
 	return err;
 }
 
+// Generate a unique process ID to DSP process
+static int get_unique_hlos_process_id(struct vfastrpc_file *vfl)
+{
+	int tgid_frpc = -1, tgid_index = 1;
+	struct vfastrpc_apps *me = vfl->apps;
+
+	spin_lock(&me->hlock);
+	for (tgid_index = 1; tgid_index < MAX_FRPC_TGID; tgid_index++) {
+		if (!frpc_tgid_usage_array[tgid_index]) {
+			tgid_frpc = tgid_index;
+			/* Set the tgid usage to false */
+			frpc_tgid_usage_array[tgid_index] = true;
+			break;
+		}
+	}
+	spin_unlock(&me->hlock);
+	return tgid_frpc;
+}
+
 static int vfastrpc_set_process_info(struct vfastrpc_file *vfl)
 {
 	struct fastrpc_file *fl = to_fastrpc_file(vfl);
@@ -2144,7 +2239,15 @@ static int vfastrpc_set_process_info(struct vfastrpc_file *vfl)
 	memcpy(cur_comm, current->comm, TASK_COMM_LEN);
 	cur_comm[TASK_COMM_LEN - 1] = '\0';
 	fl->tgid = current->tgid;
-
+	fl->tgid_frpc = get_unique_hlos_process_id(vfl);
+	VERIFY(err, fl->tgid_frpc != -1);
+	if (err) {
+		ADSPRPC_ERR("too many fastrpc clients, max %u allowed\n", MAX_FRPC_TGID);
+		err = -EUSERS;
+		return err;
+	}
+	ADSPRPC_INFO("HLOS pid %d, domain %d is mapped to unique sessions pid %d",
+						fl->tgid, vfl->domain, fl->tgid_frpc);
 	/*
 	 * Third-party apps don't have permission to open the fastrpc device, so
 	 * it is opened on their behalf by DSP HAL. This is detected by
@@ -2173,8 +2276,11 @@ static int vfastrpc_set_process_info(struct vfastrpc_file *vfl)
 			spin_unlock(&fl->hlock);
 			return err;
 		}
-		scnprintf(fl->debug_buf, buf_size, "%.10s%s%d",
-			cur_comm, "_", current->pid);
+		/* Use HLOS PID, unique fastrpc PID, CID in debugfs filename,
+		 * for better ability to debug
+		 */
+		scnprintf(fl->debug_buf, buf_size, "%.10s%s%d%s%d%s%d",
+			cur_comm, "_", current->pid, "_", fl->tgid_frpc, "_", vfl->domain);
 		fl->debugfs_file = debugfs_create_file(fl->debug_buf, 0644,
 			vfl->apps->debugfs_root, fl, vfl->apps->debugfs_fops);
 		if (IS_ERR_OR_NULL(fl->debugfs_file)) {
@@ -2202,6 +2308,18 @@ int vfastrpc_internal_get_info(struct vfastrpc_file *vfl,
 	VERIFY(err, fl != NULL);
 	if (err)
 		goto bail;
+
+	spin_lock(&fl->hlock);
+	if (fl->set_session_info) {
+		spin_unlock(&fl->hlock);
+		ADSPRPC_ERR("Set session info invoked multiple times\n");
+		err = -EBADR;
+		goto bail;
+	}
+	// Set set_session_info to true
+	fl->set_session_info = true;
+	spin_unlock(&fl->hlock);
+
 	err = vfastrpc_set_process_info(vfl);
 	if (err)
 		goto bail;
@@ -2252,10 +2370,8 @@ static int virt_fastrpc_open(struct vfastrpc_file *vfl,
 	}
 
 	vmsg = (struct virt_open_msg *)msg->txbuf;
-	vmsg->hdr.pid = fl->tgid;
+	vmsg->hdr.pid = fl->tgid_frpc;
 	vmsg->hdr.tid = current->pid;
-	if (fl->sessionid)
-		vmsg->hdr.tid |= (1 << SESSION_ID_INDEX);
 	vmsg->hdr.cid = -1;
 	vmsg->hdr.cmd = VIRTIO_FASTRPC_CMD_OPEN;
 	vmsg->hdr.len = sizeof(*vmsg);
@@ -2376,10 +2492,8 @@ static int virt_fastrpc_get_dsp_info(struct vfastrpc_file *vfl,
 	}
 
 	vmsg = (struct virt_cap_msg *)msg->txbuf;
-	vmsg->hdr.pid = fl->tgid;
+	vmsg->hdr.pid = fl->tgid_frpc;
 	vmsg->hdr.tid = current->pid;
-	if (fl->sessionid)
-		vmsg->hdr.tid |= (1 << SESSION_ID_INDEX);
 	vmsg->hdr.cid = -1;
 	vmsg->hdr.cmd = VIRTIO_FASTRPC_CMD_GET_DSP_INFO;
 	vmsg->hdr.len = sizeof(*vmsg);

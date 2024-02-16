@@ -478,7 +478,6 @@ struct ep_pcie_dev_t {
 	bool                         enumerated;
 	enum ep_pcie_link_status     link_status;
 	bool                         power_on;
-	bool                         suspending;
 	bool                         l23_ready;
 	bool                         l1ss_enabled;
 	bool                         no_notify;

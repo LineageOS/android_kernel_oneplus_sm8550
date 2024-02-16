@@ -8009,11 +8009,15 @@ static int msm_pcie_set_link_width(struct msm_pcie_dev_t *pcie_dev,
 				 LINK_WIDTH_MASK << LINK_WIDTH_SHIFT,
 				 link_width);
 
-	/* Set NUM_OF_LANES in GEN2_CTRL_OFF */
+	/*
+	 * It's advisable to set NUM_OF_LANES[8:0] field to 0x1. It allows
+	 * establishing connection on one line even if there is a termination
+	 * on the second line. Otherwise the link will go to compliance.
+	 */
 	msm_pcie_write_reg_field(pcie_dev->dm_core,
 				 PCIE_GEN3_GEN2_CTRL,
 				 NUM_OF_LANES_MASK << NUM_OF_LANES_SHIFT,
-				 link_width);
+				 LINK_WIDTH_X1);
 
 	/* enable write access to RO register */
 	msm_pcie_write_mask(pcie_dev->dm_core + PCIE_GEN3_MISC_CONTROL, 0,
@@ -8021,7 +8025,8 @@ static int msm_pcie_set_link_width(struct msm_pcie_dev_t *pcie_dev,
 
 	/* Set Maximum link width as current width */
 	msm_pcie_write_reg_field(pcie_dev->dm_core, PCIE20_CAP + PCI_EXP_LNKCAP,
-				 PCI_EXP_LNKCAP_MLW, link_width);
+				 PCI_EXP_LNKCAP_MLW,
+				 target_link_width >> PCI_EXP_LNKSTA_NLW_SHIFT);
 
 	/* disable write access to RO register */
 	msm_pcie_write_mask(pcie_dev->dm_core + PCIE_GEN3_MISC_CONTROL, BIT(0),

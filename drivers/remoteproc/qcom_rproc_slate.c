@@ -680,8 +680,6 @@ static void slate_coredump(struct rproc *rproc)
 		/* reset_cmd signals shutdown on slate, lets ack s2a irq for same
 		 * otherwise it will haunt after slate boot up and crash system.
 		 */
-		enable_irq(slate_data->status_irq);
-		slate_data->is_ready = true;
 		if (!gpio_get_value(slate_data->gpios[0])) {
 			pr_info("TWM Exit: Collect Dump, slate is CRASHED..!!\n");
 			/* We are assuming that Slate TZapp has started
@@ -691,6 +689,8 @@ static void slate_coredump(struct rproc *rproc)
 			 */
 			msleep(5000);
 		} else {
+			enable_irq(slate_data->status_irq);
+			slate_data->is_ready = true;
 			pr_info("TWM Exit: Skip dump collection, slate is RUNNING ..!!\n");
 			/* Send RESET CMD to bring slate out of RTOS state */
 			slate_data->cmd_status = 0;
@@ -702,6 +702,9 @@ static void slate_coredump(struct rproc *rproc)
 					__func__);
 				goto rtos_out;
 			}
+			/* reset_cmd signals shutdown on slate, lets ack s2a irq for same
+			 * otherwise it will haunt after slate boot up and crash system.
+			 */
 			/* By this time if S2A is not pulled then wait for it to go LOW */
 			if (gpio_get_value(slate_data->gpios[0])) {
 				ret = wait_for_err_ready(slate_data);
@@ -757,7 +760,7 @@ static void slate_coredump(struct rproc *rproc)
 	slate_tz_req.address_fw = start_addr;
 	slate_tz_req.size_fw = size;
 	ret = slate_tzapp_comm(slate_data, &slate_tz_req);
-	if (ret != 0) {
+	if (ret != 0 || slate_data->cmd_status) {
 		dev_dbg(slate_data->dev,
 			"%s: SLATE RPROC ramdmp collection failed\n",
 			__func__);
@@ -788,7 +791,6 @@ dma_free:
 rtos_out:
 	disable_irq(slate_data->status_irq);
 	slate_data->is_ready = false;
-	return;
 }
 
 /**

@@ -2434,7 +2434,6 @@ checkbme:
 		dev->link_status = EP_PCIE_LINK_UP;
 	}
 
-	dev->suspending = false;
 	goto out;
 
 link_fail_pipe_clk_deinit:
@@ -2631,13 +2630,13 @@ static irqreturn_t ep_pcie_handle_linkdown_irq(int irq, void *data)
 		EP_PCIE_DBG(dev,
 			"PCIe V%d:Linkdown IRQ happened when the link is disabled\n",
 			dev->rev);
-	} else if (dev->suspending) {
+	} else if (!atomic_read(&dev->perst_deast)) {
 		EP_PCIE_DBG(dev,
-			"PCIe V%d:Linkdown IRQ happened when the link is suspending\n",
+			"PCIe V%d:Linkdown IRQ happened when PERST asserted\n",
 			dev->rev);
 	} else {
 		dev->link_status = EP_PCIE_LINK_DISABLED;
-		EP_PCIE_ERR(dev, "PCIe V%d:PCIe link is down for %ld times\n",
+		EP_PCIE_DBG(dev, "PCIe V%d:PCIe link is down for %ld times\n",
 			dev->rev, dev->linkdown_counter);
 		ep_pcie_reg_dump(dev, BIT(EP_PCIE_RES_PHY) |
 				BIT(EP_PCIE_RES_PARF), true);

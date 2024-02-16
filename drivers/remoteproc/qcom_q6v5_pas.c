@@ -32,6 +32,7 @@
 #include <soc/qcom/secure_buffer.h>
 #include <trace/events/rproc_qcom.h>
 #include <soc/qcom/qcom_ramdump.h>
+#include <linux/remoteproc/qcom_rproc.h>
 
 #include "qcom_common.h"
 #include "qcom_pil_info.h"
@@ -634,6 +635,52 @@ static int adsp_stop(struct rproc *rproc)
 
 	return ret;
 }
+
+static int adsp_shutdown(struct rproc *rproc)
+{
+	struct qcom_adsp *adsp = (struct qcom_adsp *)rproc->priv;
+	int handover;
+
+	trace_rproc_qcom_event(dev_name(adsp->dev), "adsp_shutdown", "enter");
+
+	scm_pas_enable_bw();
+	/*
+	 * ADSP teardown is not possible in LPM. Ignore the SCM call return
+	 * status for the teardown sequence.
+	 */
+	if (adsp->retry_shutdown)
+		qcom_scm_pas_shutdown_retry(adsp->pas_id);
+	else
+		qcom_scm_pas_shutdown(adsp->pas_id);
+
+	if (adsp->dtb_pas_id)
+		qcom_scm_pas_shutdown(adsp->dtb_pas_id);
+
+	scm_pas_disable_bw();
+	adsp_pds_disable(adsp, adsp->active_pds, adsp->active_pd_count);
+	if (adsp->qmp)
+		qcom_rproc_toggle_load_state(adsp->qmp, adsp->qmp_name, false);
+	handover = qcom_q6v5_unprepare(&adsp->q6v5);
+	if (handover)
+		qcom_pas_handover(&adsp->q6v5);
+
+	trace_rproc_qcom_event(dev_name(adsp->dev), "adsp_shutdown", "exit");
+
+	return 0;
+}
+
+void adsp_set_ops_stop(struct rproc *rproc, bool suspend)
+{
+	struct qcom_adsp *adsp;
+
+	adsp = (struct qcom_adsp *)rproc->priv;
+	qcom_sysmon_set_ops_stop(adsp->sysmon, suspend);
+	if (suspend)
+		rproc->ops->stop = adsp_shutdown;
+	else
+		rproc->ops->stop = adsp_stop;
+}
+EXPORT_SYMBOL_GPL(adsp_set_ops_stop);
 
 static int adsp_attach(struct rproc *rproc)
 {
