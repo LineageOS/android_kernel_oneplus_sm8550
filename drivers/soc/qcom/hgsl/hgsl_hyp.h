@@ -441,6 +441,8 @@ struct hgsl_dbq_info {
 	int32_t  queue_off_dwords;
 	uint32_t db_signal;
 	struct dma_buf *dma_buf;
+	uint64_t gmuaddr;
+	uint32_t ibdesc_max_size;
 	struct hgsl_hab_channel_t *hab_channel;
 };
 

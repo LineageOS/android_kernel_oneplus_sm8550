@@ -309,8 +309,6 @@ static void ep_pcie_show_status(struct ep_pcie_dev_t *dev)
 	EP_PCIE_DBG_FS("PCIe: link is %s\n",
 		(dev->link_status == EP_PCIE_LINK_ENABLED)
 		? "enabled" : "disabled");
-	EP_PCIE_DBG_FS("the link is %s suspending\n",
-		dev->suspending ? "" : "not");
 	EP_PCIE_DBG_FS("the power is %s on\n",
 		dev->power_on ? "" : "not");
 	EP_PCIE_DBG_FS("linkdown_counter: %lu\n",

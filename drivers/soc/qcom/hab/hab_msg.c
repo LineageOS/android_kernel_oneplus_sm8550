@@ -614,7 +614,8 @@ static void hab_recv_unimport_msg(struct physical_channel *pchan, int vchan_exis
 
 static int hab_try_get_vchan(struct physical_channel *pchan,
 				struct hab_header *header,
-				struct virtual_channel **vchan_out)
+				struct virtual_channel **vchan_out,
+				int *need_ret)
 {
 	struct virtual_channel *vchan = NULL;
 	size_t sizebytes = HAB_HEADER_GET_SIZE(*header);
@@ -644,6 +645,7 @@ static int hab_try_get_vchan(struct physical_channel *pchan,
 		 */
 		vchan = hab_vchan_get(pchan, header);
 		if (!vchan) {
+			*need_ret = 1;
 			pr_debug("vchan not found type %d vcid %x sz %zx sesn %d\n",
 				payload_type, vchan_id, sizebytes, session_id);
 
@@ -661,6 +663,7 @@ static int hab_try_get_vchan(struct physical_channel *pchan,
 			}
 			return -EINVAL;
 		} else if (vchan->otherend_closed) {
+			*need_ret = 1;
 			hab_vchan_put(vchan);
 			pr_info("vchan remote closed type %d, vchan id %x, sizebytes %zx, session %d\n",
 				payload_type, vchan_id,
@@ -675,6 +678,7 @@ static int hab_try_get_vchan(struct physical_channel *pchan,
 		}
 	} else {
 		if (sizebytes != sizeof(struct hab_open_send_data)) {
+			*need_ret = 1;
 			pr_err("%s Invalid open req type %d vcid %x bytes %zx session %d\n",
 				pchan->name, payload_type, vchan_id,
 				sizebytes, session_id);
@@ -712,9 +716,10 @@ int hab_msg_recv(struct physical_channel *pchan,
 	int found = 0;
 	struct hab_import_data imp_data = {0};
 	int irqs_disabled = irqs_disabled();
+	int need_ret = 0;
 
-	ret = hab_try_get_vchan(pchan, header, &vchan);
-	if (ret != 0 || ((vchan == NULL) && (payload_type == HAB_PAYLOAD_TYPE_UNIMPORT)))
+	ret = hab_try_get_vchan(pchan, header, &vchan, &need_ret);
+	if (need_ret)
 		return ret;
 
 	switch (payload_type) {

@@ -56,14 +56,23 @@ struct db_buffer {
 	void  *vaddr;
 };
 
+struct dbq_ibdesc_priv {
+	bool   buf_inuse;
+	uint32_t context_id;
+	uint32_t timestamp;
+};
+
 struct doorbell_queue {
 	struct dma_buf *dma;
 	struct dma_buf_map map;
 	void *vbase;
+	uint64_t  gmuaddr;
 	struct db_buffer data;
 	uint32_t state;
 	int tcsr_idx;
 	uint32_t dbq_idx;
+	struct dbq_ibdesc_priv ibdesc_priv;
+	uint32_t  ibdesc_max_size;
 	struct mutex lock;
 	atomic_t seq_num;
 };

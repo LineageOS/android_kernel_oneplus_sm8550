@@ -511,10 +511,9 @@ static int hgsl_alloc_pages(struct device *dev, uint32_t requested_pcount,
 		for (i = 0; i < pcount; i++)
 			pages[i] = nth_page(page, i);
 		_dma_cache_op(dev, page, pcount, GSL_CACHEFLAGS_FLUSH);
-	}
-
-	mod_node_page_state(page_pgdat(page), NR_KERNEL_MISC_RECLAIMABLE,
+		mod_node_page_state(page_pgdat(page), NR_KERNEL_MISC_RECLAIMABLE,
 						(1 << order));
+	}
 
 	return pcount;
 }
@@ -619,3 +618,16 @@ struct hgsl_mem_node *hgsl_mem_find_base_locked(struct list_head *head,
 	return node_found;
 }
 
+void *hgsl_mem_node_zalloc(bool iocoherency)
+{
+	struct hgsl_mem_node *mem_node = NULL;
+
+	mem_node = hgsl_zalloc(sizeof(*mem_node));
+	if (mem_node == NULL)
+		goto out;
+
+	mem_node->default_iocoherency = iocoherency;
+
+out:
+	return mem_node;
+}

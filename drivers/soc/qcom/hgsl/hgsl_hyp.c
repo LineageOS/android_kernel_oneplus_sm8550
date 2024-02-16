@@ -2202,6 +2202,19 @@ int hgsl_hyp_get_dbq_info(struct hgsl_hyp_priv_t *priv, uint32_t dbq_idx,
 		LOGE("gsl_rpc_read_uint32_l failed, %d", ret);
 		goto out;
 	}
+	ret = gsl_rpc_read_uint64_l(recv_buf, &dbq_info->gmuaddr);
+	if (ret)
+		LOGW("gsl_rpc_read_uint64_l failed, %d", ret);
+	else {
+		ret = gsl_rpc_read_uint32_l(recv_buf,
+					&dbq_info->ibdesc_max_size);
+		if (ret)
+			LOGW("gsl_rpc_read_uint32_l failed, %d", ret);
+	}
+	if (ret) {
+		dbq_info->ibdesc_max_size = 0;
+		ret = 0;
+	}
 	dbq_info->size = (dbq_info->size + (0x1000 - 1)) & (~(0x1000 - 1));
 	ret = habmm_import(hab_channel->socket,
 		(void **)&dma_buf, dbq_info->size,
@@ -2539,6 +2552,7 @@ out:
 static int read_shadowts_mem_be(struct hgsl_hab_channel_t *hab_channel,
 				struct hgsl_context *ctxt)
 {
+	struct qcom_hgsl *hgsl = ctxt->priv->dev;
 	struct gsl_hab_payload *recv_buf = &hab_channel->recv_buf;
 	uint32_t export_id = 0;
 	struct hgsl_mem_node *mem_node = NULL;
@@ -2557,7 +2571,7 @@ static int read_shadowts_mem_be(struct hgsl_hab_channel_t *hab_channel,
 	}
 
 	if (rpc_shadow.flags & GSL_FLAGS_INITIALIZED) {
-		mem_node = hgsl_zalloc(sizeof(*mem_node));
+		mem_node = hgsl_mem_node_zalloc(hgsl->default_iocoherency);
 		if (mem_node == NULL) {
 			ret = -ENOMEM;
 			goto out;
@@ -2606,6 +2620,7 @@ int hgsl_hyp_ctxt_create_v1(struct device *dev,
 {
 	struct hgsl_mem_node *mem_node = NULL;
 	struct gsl_hab_payload *recv_buf = NULL;
+	struct qcom_hgsl *hgsl = priv->dev;
 	int ret = 0;
 	int rval = GSL_SUCCESS;
 
@@ -2625,7 +2640,7 @@ int hgsl_hyp_ctxt_create_v1(struct device *dev,
 	}
 	recv_buf = &hab_channel->recv_buf;
 
-	mem_node = hgsl_zalloc(sizeof(*mem_node));
+	mem_node = hgsl_mem_node_zalloc(hgsl->default_iocoherency);
 	if (mem_node == NULL) {
 		ret = -ENOMEM;
 		goto out;

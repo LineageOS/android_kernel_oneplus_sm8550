@@ -82,4 +82,6 @@ void hgsl_put_sgt(struct hgsl_mem_node *mem_node, bool internal);
 struct hgsl_mem_node *hgsl_mem_find_base_locked(struct list_head *head,
 	uint64_t gpuaddr, uint64_t size);
 
+void *hgsl_mem_node_zalloc(bool iocoherency);
+
 #endif
