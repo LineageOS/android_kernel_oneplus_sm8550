@@ -1389,7 +1389,7 @@ static void oplus_comm_check_battery_status(struct oplus_chg_comm *chip)
 		goto check_done;
 	}
 	if (!chip->wired_online && !chip->wls_online) {
-		batt_status = POWER_SUPPLY_STATUS_NOT_CHARGING;
+		batt_status = POWER_SUPPLY_STATUS_DISCHARGING;
 		goto check_done;
 	}
 	if (chip->batt_full && mmi_chg) {
