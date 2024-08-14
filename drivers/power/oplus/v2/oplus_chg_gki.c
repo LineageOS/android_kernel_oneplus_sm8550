@@ -669,7 +669,7 @@ static int battery_psy_get_prop(struct power_supply *psy,
 		pval->intval = chip->batt_capacity_mah * 1000;
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL:
-		pval->intval = chip->batt_capacity_mah * 1000;
+		pval->intval = chip->batt_fcc * 1000;
 		break;
 	case POWER_SUPPLY_PROP_ENERGY_FULL:
 		oplus_gauge_get_qmax(chip->gauge_topic, 0, &batt_qmax_0);
