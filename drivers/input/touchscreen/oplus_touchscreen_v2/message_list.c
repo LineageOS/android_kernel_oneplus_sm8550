@@ -29,39 +29,37 @@ bool post_message(struct message_list *list, int len, int type, u8 *msg)
 		return false;
 	}
 
-	if (len <= 0 || len > list->block_size) {
-		MESSAGE_LOG("len %d, block size %d.", len, list->block_size);
-		return false;
-	}
 	node = kzalloc(sizeof(struct message_node), GFP_KERNEL);
 	if (NULL == node || IS_ERR(node)) {
 		MESSAGE_LOG("%s post fail.", list->name);
 		return false;
 	}
-	MESSAGE_DBG("post_message:lock list 0x%p,node addr 0x%llx node 0x%llx", list, (u64)&node, (u64)node);
+	MESSAGE_DBG("post_message:lock list 0x%x,node addr 0x%x node 0x%x", list, (u64)&node, (u64)node);
 	spin_lock_irqsave(&list->lock, flags);
 	if (list->size >= list->max_size) {
 		kfree(node);
 		MESSAGE_ERR("%s list is full.", list->name);
 		spin_unlock_irqrestore(&list->lock, flags);
-		MESSAGE_DBG("post_message: unlock list 0x%p,node 0x%llx", list, (u64)node);
+		MESSAGE_DBG("post_message: unlock list 0x%x,node 0x%x", list, (u64)node);
 		return false;
 	}
 
-	node->used_bit = find_bit(list->memory_bit);
-	if (node->used_bit >= list->max_size) {
-		kfree(node);
-		MESSAGE_ERR("%s post fail useb bit %d.", list->name, node->used_bit);
-		spin_unlock_irqrestore(&list->lock, flags);
-		MESSAGE_DBG("post_message: unlock list 0x%p,node 0x%llx", list, (u64)node);
-		return false;
-	}
-	node->msg = &list->memory_buf[node->used_bit*list->block_size];
-	memset(node->msg, 0, list->block_size);
-	node->used_bit = 1 << node->used_bit;
-	list->memory_bit &= (~node->used_bit);
+	if (len > 0) {
+		node->used_bit = find_bit(list->memory_bit);
+		if (node->used_bit >= list->max_size) {
+			kfree(node);
+			MESSAGE_ERR("%s post fail useb bit %d.", list->name, node->used_bit);
+			spin_unlock_irqrestore(&list->lock, flags);
+			MESSAGE_DBG("post_message: unlock list 0x%x,node 0x%x", list, (u64)node);
+			return false;
+		}
+		node->msg = &list->memory_buf[node->used_bit*list->block_size];
+		memset(node->msg, 0, list->block_size);
+		node->used_bit = 1 << node->used_bit;
+		list->memory_bit &= (~node->used_bit);
 
-	memcpy(node->msg, msg, len);
+		memcpy(node->msg, msg, len);
+	}
 
 	node->len = len;
 	node->type = type;
@@ -73,7 +71,7 @@ bool post_message(struct message_list *list, int len, int type, u8 *msg)
 	list->size= list->size + 1;
 	MESSAGE_DBG("%s post message, list size is %d.", list->name, list->size);
 	spin_unlock_irqrestore(&list->lock, flags);
-	MESSAGE_DBG("post_message: unlock list 0x%p,0x%llx", list, (u64)node);
+	MESSAGE_DBG("post_message: unlock list 0x%x,0x%x", list, (u64)node);
 	wake_up_interruptible(&list->waiter);
 
 	return true;
@@ -83,30 +81,31 @@ struct message_node *get_message(struct message_list *list, int timeout)
 {
 	struct message_node *msg;
 	unsigned long flags;
-	int ret = 0;
 
 	if (NULL == list) {
 		return NULL;
 	}
 	if (list->size == 0) {
 		if (0 == timeout) {
-			ret = wait_event_interruptible(list->waiter, list->size);
+			wait_event_interruptible(list->waiter, list->size);
 		} else {
-			ret = wait_event_interruptible_timeout(list->waiter, list->size, timeout);
+			wait_event_interruptible_timeout(list->waiter,
+							 list->size,
+							 timeout);
 		}
 	}
 	if (list->size <= 0) {
-		MESSAGE_ERR("%s list size is %d, ret %d.", list->name, list->size, ret);
+		MESSAGE_ERR("%s list size is error %d.", list->name, list->size);
 		return NULL;
 	}
 	MESSAGE_DBG("%s get message, list size is %d.", list->name, list->size);
-	MESSAGE_DBG("get_message:lock list 0x%p,node 0x%llx", list, (u64)&msg);
+	MESSAGE_DBG("get_message:lock list 0x%x,node 0x%x", list, (u64)&msg);
 	spin_lock_irqsave(&list->lock, flags);
 	msg = list_first_entry(&list->head, struct message_node, node);
 	list_del_init(&msg->node);
 	list->size--;
 	spin_unlock_irqrestore(&list->lock, flags);
-	MESSAGE_DBG("get_message:unlock list 0x%p,node 0x%p", list, msg);
+	MESSAGE_DBG("get_message:unlock list 0x%x,node 0x%x", list, msg);
 
 	return msg;
 }
@@ -119,11 +118,11 @@ void delete_message_node(struct message_list *list, struct message_node **msg)
 	}
 
 	if ((*msg) != NULL) {
-		MESSAGE_DBG("delete_message_node:lock list 0x%p,node 0x%llx", list, (u64)*msg);
+		MESSAGE_DBG("delete_message_node:lock list 0x%x,node 0x%x", list, (u64)*msg);
 		spin_lock_irqsave(&list->lock, flags);
 		list->memory_bit |= (*msg)->used_bit;
 		spin_unlock_irqrestore(&list->lock, flags);
-		MESSAGE_DBG("delete_message_node:unlock list 0x%p,node 0x%llx", list, (u64)*msg);
+		MESSAGE_DBG("delete_message_node:unlock list 0x%x,node 0x%x", list, (u64)*msg);
 		kfree(*msg);
 		*msg = NULL;
 	}
@@ -141,7 +140,7 @@ struct message_list *init_message_list(int max_size,
 		MESSAGE_ERR("%s, message list init failed!", name);
 		goto ERROR_EXIT;
 	}
-	if ((max_size > MAX_STATIC_SIZE || block_size > MAX_BLOCK_BIT)) {
+	if ((max_size > MAX_STATIC_SIZE || block_size > 12)) {
 		MESSAGE_ERR("%s, static message list init failed!", name);
 		goto ERROR_EXIT;
 	}
@@ -201,7 +200,7 @@ bool clear_message_list(struct message_list **list)
 	(*list)->size = -1;
 	wake_up_interruptible(&(*list)->waiter);
 
-	MESSAGE_DBG("clear_message_list:lock list 0x%llx", (u64)*list);
+	MESSAGE_DBG("clear_message_list:lock list 0x%x", (u64)*list);
 	spin_lock_irqsave(&(*list)->lock, flags);
 
 	list_for_each_entry_safe(pnode, pn_node, &(*list)->head, node) {
@@ -214,13 +213,13 @@ bool clear_message_list(struct message_list **list)
 
 	if (!list_empty(&(*list)->head)) {
 		spin_unlock_irqrestore(&(*list)->lock, flags);
-		MESSAGE_DBG("clear_message_list:unlock list 0x%llx", (u64)*list);
+		MESSAGE_DBG("clear_message_list:unlock list 0x%x", (u64)*list);
 		MESSAGE_ERR("%s,message list not empty after clear!", (*list)->name);
 		return false;
 	}
 	MESSAGE_LOG("%s,message list clear!", (*list)->name);
 	spin_unlock_irqrestore(&(*list)->lock, flags);
-	MESSAGE_DBG("clear_message_list:unlock list 0x%llx", (u64)*list);
+	MESSAGE_DBG("clear_message_list:unlock list 0x%x", (u64)*list);
 	return true;
 }
 
@@ -236,7 +235,7 @@ bool delete_message_list(struct message_list **list)
 
 	(*list)->size = -1;
 	wake_up_interruptible(&(*list)->waiter);
-	MESSAGE_DBG("clear_message_list:lock list 0x%llx", (u64)*list);
+	MESSAGE_DBG("clear_message_list:lock list 0x%x", (u64)*list);
 	spin_lock_irqsave(&(*list)->lock, flags);
 
 	list_for_each_entry_safe(pnode, pn_node, &(*list)->head, node) {
@@ -246,7 +245,7 @@ bool delete_message_list(struct message_list **list)
 
 	if (!list_empty(&(*list)->head)) {
 		spin_unlock_irqrestore(&(*list)->lock, flags);
-		MESSAGE_DBG("clear_message_list:unlock list 0x%llx", (u64)*list);
+		MESSAGE_DBG("clear_message_list:unlock list 0x%x", (u64)*list);
 		MESSAGE_ERR("%s,message list not empty after delete!", (*list)->name);
 		return false;
 	}
@@ -258,7 +257,7 @@ bool delete_message_list(struct message_list **list)
 		kfree((*list)->memory_buf);
 	}
 	spin_unlock_irqrestore(&(*list)->lock, flags);
-	MESSAGE_DBG("clear_message_list:unlock list 0x%llx", (u64)*list);
+	MESSAGE_DBG("clear_message_list:unlock list 0x%x", (u64)*list);
 	kfree(*list);
 	*list = NULL;
 	return true;
