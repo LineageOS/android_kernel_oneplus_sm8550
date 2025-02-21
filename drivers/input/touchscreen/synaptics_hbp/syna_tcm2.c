@@ -707,10 +707,15 @@ static void syna_dev_report_input_events(struct syna_tcm *tcm)
 					LOGI("unknown fingerprint error type: 0x%x\n", touch_data->extra_gesture_info[0]);
 					break;
 				}
-			} else {
+			} else if (touch_data->gesture_id == DTAP_DETECT) {
 				input_report_key(input_dev, KEY_WAKEUP, 1);
 				input_sync(input_dev);
 				input_report_key(input_dev, KEY_WAKEUP, 0);
+				input_sync(input_dev);
+			} else {
+				input_report_key(input_dev, KEY_F4, 1); 
+				input_sync(input_dev);
+				input_report_key(input_dev, KEY_F4, 0);
 				input_sync(input_dev);
 			}
 		}
