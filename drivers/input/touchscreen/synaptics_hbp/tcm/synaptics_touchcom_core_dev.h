@@ -595,6 +595,7 @@ struct tcm_touch_data_blob {
 
 	/* for gesture */
 	unsigned int gesture_id;
+	unsigned int g_type;
 	struct tcm_gesture_data_blob gesture_data;
 	unsigned char data_point[24]; /*6 points*/
 	unsigned char extra_gesture_info[6];
