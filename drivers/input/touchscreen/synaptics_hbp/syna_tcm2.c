@@ -616,6 +616,120 @@ static void syna_dev_free_input_events(struct syna_tcm *tcm)
 
 }
 
+static void findGestId(struct syna_tcm *tcm)
+{
+	struct tcm_touch_data_blob *touch_data;
+
+	uint32_t gesture_type = UNKOWN_GESTURE;
+	uint32_t clockwise = 2;
+
+	touch_data = &tcm->tp_data;
+
+	switch (touch_data->gesture_id) {
+	case DTAP_DETECT:
+		gesture_type = DOU_TAP;
+		break;
+
+	case CIRCLE_DETECT:
+		gesture_type = CIRCLE_GESTURE;
+
+		if (touch_data->extra_gesture_info[2] == 0x10) {
+			clockwise = 1;
+
+		} else if (touch_data->extra_gesture_info[2] == 0x20) {
+			clockwise = 0;
+		}
+
+		break;
+
+	case SWIPE_DETECT:
+		if (touch_data->extra_gesture_info[4] == 0x41) { /*x+*/
+			gesture_type = LEFT2RIGHT_SWIP;
+
+		} else if (touch_data->extra_gesture_info[4] == 0x42) { /*x-*/
+			gesture_type = RIGHT2LEFT_SWIP;
+
+		} else if (touch_data->extra_gesture_info[4] == 0x44) { /*y+*/
+			gesture_type = UP2DOWN_SWIP;
+
+		} else if (touch_data->extra_gesture_info[4] == 0x48) { /*y-*/
+			gesture_type = DOWN2UP_SWIP;
+
+		} else if (touch_data->extra_gesture_info[4] == 0x81) { /*2x-*/
+			gesture_type = DOU_SWIP;
+
+		} else if (touch_data->extra_gesture_info[4] == 0x82) { /*2x+*/
+			gesture_type = DOU_SWIP;
+
+		} else if (touch_data->extra_gesture_info[4] == 0x84) { /*2y+*/
+			gesture_type = DOU_SWIP;
+
+		} else if (touch_data->extra_gesture_info[4] == 0x88) { /*2y-*/
+			gesture_type = DOU_SWIP;
+		}
+
+		break;
+
+	case M_UNICODE:
+		gesture_type = M_GESTRUE;
+		break;
+
+	case W_UNICODE:
+		gesture_type = W_GESTURE;
+		break;
+
+	case VEE_DETECT:
+		if (touch_data->extra_gesture_info[2] == 0x02) { /*up*/
+			gesture_type = UP_VEE;
+
+		} else if (touch_data->extra_gesture_info[2] == 0x01) { /*down*/
+			gesture_type = DOWN_VEE;
+
+		} else if (touch_data->extra_gesture_info[2] == 0x08) { /*left*/
+			gesture_type = LEFT_VEE;
+
+		} else if (touch_data->extra_gesture_info[2] == 0x04) { /*right*/
+			gesture_type = RIGHT_VEE;
+		}
+
+		break;
+
+	case TOUCH_HOLD_DOWN:
+		gesture_type = FINGER_PRINTDOWN;
+		break;
+
+	case TOUCH_HOLD_UP:
+		gesture_type = FRINGER_PRINTUP;
+		break;
+
+	case HEART_DETECT:
+		gesture_type = HEART;
+
+		if (touch_data->extra_gesture_info[2] == 0x10) {
+			clockwise = 1;
+
+		} else if (touch_data->extra_gesture_info[2] == 0x20) {
+			clockwise = 0;
+		}
+		break;
+
+	case STAP_DETECT:
+		gesture_type = SINGLE_TAP;
+		break;
+
+	case S_UNICODE:
+		gesture_type = S_GESTURE;
+		break;
+
+	case TRIANGLE_DETECT:
+	default:
+		TPD_INFO("not support\n");
+		break;
+	}
+
+	touch_data->g_type = gesture_type;
+}
+
 /**
  * syna_dev_report_input_events()
  *
@@ -658,6 +772,8 @@ static void syna_dev_report_input_events(struct syna_tcm *tcm)
 		if (touch_data->gesture_id) {
 			LOGD("Gesture detected, id:%d\n",
 				touch_data->gesture_id);
+
+			findGestId(tcm);
 
 			if (touch_data->gesture_id == TOUCH_HOLD_DOWN) {
 				if (!tcm->is_fp_down) {
