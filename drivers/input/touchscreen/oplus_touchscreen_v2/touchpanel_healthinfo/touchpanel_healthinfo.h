@@ -86,6 +86,10 @@ typedef enum {
 	HEALTH_BELOW_RATE,
 	HEALTH_AVDD,
 	HEALTH_VDDI,
+	HEALTH_RAW_TOUCH,
+	HEALTH_GRIP_RECLINING,
+	HEALTH_IRQ_TYPE,
+	HEALTH_GLOVE,
 } healthinfo_type;
 
 void reset_healthinfo_time_counter(u64 *time_counter);
