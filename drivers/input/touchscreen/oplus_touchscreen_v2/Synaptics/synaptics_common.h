@@ -37,6 +37,7 @@
 #define MAX_LIMIT_NAME_SIZE 16
 
 /*********PART3:Struct Area**********************/
+#define SIMULATE_DEBUG_INFO 0xff
 typedef enum {
 	BASE_NEGATIVE_FINGER = 0x02,
 	BASE_MUTUAL_SELF_CAP = 0x04,
@@ -53,6 +54,12 @@ typedef enum {
 	BASE_V2_ENERGY_RATIO = 0x04,
 	BASE_V2_BUMPINESS = 0x05,
 	BASE_V2_NEGTIVE_FINGER = 0x06,
+	BASE_V2_STD_ERROR = 0x07,
+	BASE_V2_CRITI_ERROR = 0x08,
+	BASE_V2_STD_CRITI = 0x09,
+	BASE_V2_METAL_PLATE = 0x0A,
+	BASE_V2_WATER_DROP = 0x0B,
+	BASE_V2_BIG_ABS_SHIFT = 0x0C,
 } BASELINE_ERR_V2; /* used by S3910 */
 
 typedef enum {
@@ -240,6 +247,18 @@ struct syna_auto_test_operations {
 	int (*syna_auto_test_endoperation)(struct seq_file *s, void *chip_data,
 					   struct auto_testdata *syna_testdata,
 					   struct test_item_info *p_test_item_info);
+	int (*syna_auto_black_screen_test_preoperation)(struct seq_file *s, void *chip_data,
+					   struct auto_testdata *syna_testdata,
+					   struct test_item_info *p_test_item_info);
+	int (*syna_auto_black_screen_test_endoperation)(struct seq_file *s, void *chip_data,
+					   struct auto_testdata *syna_testdata,
+					   struct test_item_info *p_test_item_info);
+	int (*syna_black_screen_test_noise)(struct seq_file *s, void *chip_data,
+					   struct auto_testdata *syna_testdata,
+					   struct test_item_info *p_test_item_info);
+	int (*syna_black_screen_test_dynamic)(struct seq_file *s, void *chip_data,
+					   struct auto_testdata *syna_testdata,
+					   struct test_item_info *p_test_item_info);
 };
 
 int  synaptics_create_proc(struct touchpanel_data *ts,
@@ -251,5 +270,7 @@ void synaptics_parse_header(struct image_header_data *header,
 int synaptics_parse_header_v2(struct image_info *image_info,
 			      const unsigned char *fw_image);
 int synaptics_auto_test(struct seq_file *s,  struct touchpanel_data *ts);
+int synaptics_black_screen_test(struct black_gesture_test *p,
+			      struct touchpanel_data *ts);
 
 #endif  /*SYNAPTICS_H*/
