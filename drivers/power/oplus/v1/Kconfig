@@ -48,6 +48,11 @@ config OPLUS_CHARGER_OPTIGA
 	help
 	  Say Y to include support
 
+config OPLUS_CHARGER_MAXIM
+	bool "OPLUS MAXIM soc node"
+	help
+	  Say Y to include support
+
 config OPLUS_MTK_DRM_GKI_NOTIFY_CHG
 	default n
 	tristate "chg mtk gki notify"
@@ -56,4 +61,9 @@ config OPLUS_SM8450_CHARGER
 	bool "OPLUS SM8450 charger driver"
 	help
 	  Enables support for the sm8450 charging
+
+config OPLUS_CHARGER_OPTIGA
+	bool "OPLUS OPTIGA soc node"
+	help
+	  Say Y to include support
 
