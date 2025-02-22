@@ -107,6 +107,17 @@ enum bat_temp_state_enum {
 	BAT_TEMP_HIGH
 };
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+enum mtk_pd_connect_type { //pd_adapter_event
+	MTK_PD_CONNECT_NONE,
+	MTK_PD_CONNECT_HARD_RESET,
+	MTK_PD_CONNECT_SOFT_RESET,
+	MTK_PD_CONNECT_PE_READY_SNK,
+	MTK_PD_CONNECT_PE_READY_SNK_PD30,
+	MTK_PD_CONNECT_PE_READY_SNK_APDO,
+	MTK_PD_CONNECT_TYPEC_ONLY_SNK,
+};
+#endif
 enum chg_dev_notifier_events {
 	EVENT_FULL,
 	EVENT_RECHARGE,
@@ -164,6 +175,11 @@ struct sw_jeita_data {
 	int cv;
 	bool charging;
 	bool error_recovery_flag;
+};
+
+struct info_notifier_block {
+	struct notifier_block nb;
+	struct mtk_charger *info;
 };
 
 struct mtk_charger_algorithm {
@@ -261,6 +277,8 @@ typedef enum {
 	NTC_BATTERY_BTB,
 	NTC_SUB_BATTERY_BTB,
 	NTC_USB_BTB,
+	NTC_MASTER_CP_BTB,
+	NTC_SLAVE_CP_BTB,
 } NTC_TYPE;
 
 struct temp_param {
@@ -317,9 +335,11 @@ struct mtk_charger {
 #ifdef OPLUS_FEATURE_CHG_BASIC
 	struct oplus_chg_ic_dev *ic_dev;
 	struct oplus_chg_ic_dev *gauge_ic_dev;
+	struct oplus_chg_ic_dev *pps_ic;
 	bool wls_boost_soft_start;
 	int wls_set_boost_vol;
 	struct oplus_mms *gauge_topic;
+	int low_batt_otg_boost_curr_ua;
 #endif
 
 	struct platform_device *pdev;
@@ -351,21 +371,33 @@ struct mtk_charger {
 	struct power_supply_config psy_dvchg_cfg2;
 	struct power_supply *psy_dvchg2;
 
-	struct power_supply  *chg_psy;
-	struct power_supply  *bat_psy;
+	struct power_supply *chg_psy;
+	struct power_supply *bat_psy;
+	struct power_supply *bat2_psy;
+	struct power_supply *bat_manager_psy;
+	struct adapter_device *select_adapter;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+	struct adapter_device *adapter_dev[MAX_TA_IDX];
+	struct info_notifier_block ta_nb[MAX_TA_IDX];
+#endif
 	struct adapter_device *pd_adapter;
 	struct notifier_block pd_nb;
 	struct mutex pd_lock;
 	int pd_type;
 	bool pd_reset;
 	bool otg_enable;
+	struct mutex ta_lock;
 
 	u32 bootmode;
 	u32 boottype;
-
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+	int ta_status[MAX_TA_IDX];
+#endif
+	int select_adapter_idx;
 	int chr_type;
 	int usb_type;
 	int usb_state;
+	int adapter_priority;
 
 	struct mutex cable_out_lock;
 	int cable_out_cnt;
@@ -439,6 +471,7 @@ struct mtk_charger {
 
 	/* water detection */
 	bool water_detected;
+	bool record_water_detected;
 
 	bool enable_dynamic_mivr;
 
@@ -468,10 +501,17 @@ struct mtk_charger {
 	struct iio_channel	*batt_btb_temp_chan;
 	struct iio_channel	*sub_batt_btb_temp_chan;
 	struct iio_channel	*usb_btb_temp_chan;
+	struct iio_channel	*master_cp_chan;
+	struct iio_channel	*slave_cp_chan;
 
 #ifdef CONFIG_THERMAL
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+	struct thermal_zone_device *master_cp_temp_tzd;
+	struct thermal_zone_device *slave_cp_temp_tzd;
+#else
 	struct thermal_zone_device *cp_temp_tzd;
 	struct thermal_zone_device *sub_batt_temp_tzd;
+#endif
 #endif
 
 	int ccdetect_gpio;
@@ -501,6 +541,14 @@ struct mtk_charger {
 	struct wakeup_source *status_wake_lock;
 	bool status_wake_lock_on;
 	bool hvdcp_disable;
+
+	bool usbtemp_dischg_reg_configurable;
+	int usbtemp_dischg_reg_addr;
+	int usbtemp_dischg_reg_mask;
+	int usbtemp_dischg_enable;
+	int usbtemp_dischg_disable;
+	int wls_boost_vol_start_mv;
+	int wls_boost_vol_max_mv;
 #endif
 };
 
