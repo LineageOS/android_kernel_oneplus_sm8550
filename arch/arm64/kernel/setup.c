@@ -293,6 +293,19 @@ u64 cpu_logical_map(unsigned int cpu)
 	return __cpu_logical_map[cpu];
 }
 
+static int __init oplusboot_startupmode(char *p)
+{
+	if (strcmp(p, "usb_charger")) {
+		return 1;
+	}
+
+	strlcat(boot_command_line, " androidboot.mode=charger",
+		COMMAND_LINE_SIZE);
+
+	return 0;
+}
+early_param("oplusboot.startupmode", oplusboot_startupmode);
+
 void __init __no_sanitize_address setup_arch(char **cmdline_p)
 {
 	setup_initial_init_mm(_stext, _etext, _edata, _end);
