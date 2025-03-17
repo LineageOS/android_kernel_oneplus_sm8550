@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "5d6bab22_61252187",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 2
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 13648
+      },
+      "writtenOn": "2025-03-17T21:30:07Z",
+      "side": 1,
+      "message": "Tried a bit more, looks like `off-mode-charge` is 0 by default on salami. Enabling it with `fastboot oem disable-charger-screen` throws the device back to bootloader while on charger. Since `off-mode-charge` is disabled, it always boots in normal mode.",
+      "revId": "51b44d907f8f0fe35f9f7b96920eb45fa72c1ea5",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71"
+    }
+  ]
+}
