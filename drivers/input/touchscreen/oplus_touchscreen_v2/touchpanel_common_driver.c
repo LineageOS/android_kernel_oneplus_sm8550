@@ -541,7 +541,7 @@ static inline void tp_touch_down(struct touchpanel_data *ts, struct point_info p
 	}
 	if (ts->last_x_y_point[id].x != points.x || ts->last_x_y_point[id].y != points.y) {
 		cost_time = ktime_to_us(ktime_get()) - ktime_to_us(ts->monitor_data.irq_to_report_timer);
-		input_report_abs(ts->input_dev, ABS_TOUCH_COST_TIME_KERNEL, (cost_time < MAX_TOUCH_COST_TIME) ? cost_time : MAX_TOUCH_COST_TIME);
+		//input_report_abs(ts->input_dev, ABS_TOUCH_COST_TIME_KERNEL, (cost_time < MAX_TOUCH_COST_TIME) ? cost_time : MAX_TOUCH_COST_TIME);
 	}
 	ts->last_x_y_point[id].x = points.x;
 	ts->last_x_y_point[id].y = points.y;
@@ -1813,8 +1813,8 @@ static int init_input_device(struct touchpanel_data *ts)
 	set_bit(ABS_MT_POSITION_X, ts->input_dev->absbit);
 	set_bit(ABS_MT_POSITION_Y, ts->input_dev->absbit);
 	set_bit(ABS_MT_PRESSURE, ts->input_dev->absbit);
-	set_bit(ABS_TOUCH_COST_TIME_KERNEL, ts->input_dev->absbit);
-	/*set_bit(ABS_TOUCH_COST_TIME_ALGO, ts->input_dev->absbit);
+	/*set_bit(ABS_TOUCH_COST_TIME_KERNEL, ts->input_dev->absbit);
+	set_bit(ABS_TOUCH_COST_TIME_ALGO, ts->input_dev->absbit);
 	set_bit(ABS_TOUCH_COST_TIME_DAEMON, ts->input_dev->absbit);*/
 	set_bit(ABS_MT_TOOL_TYPE, ts->input_dev->absbit);
 	set_bit(INPUT_PROP_DIRECT, ts->input_dev->propbit);
@@ -1894,8 +1894,8 @@ static int init_input_device(struct touchpanel_data *ts)
 			     ts->resolution_info.max_x - 1, 0, 0);
 	input_set_abs_params(ts->input_dev, ABS_MT_POSITION_Y, 0,
 			     ts->resolution_info.max_y - 1, 0, 0);
-	input_set_abs_params(ts->input_dev, ABS_TOUCH_COST_TIME_KERNEL, 0, MAX_TOUCH_COST_TIME, 0, 0);
-	/*input_set_abs_params(ts->input_dev, ABS_TOUCH_COST_TIME_ALGO, 0, MAX_TOUCH_COST_TIME, 0, 0);
+	/*input_set_abs_params(ts->input_dev, ABS_TOUCH_COST_TIME_KERNEL, 0, MAX_TOUCH_COST_TIME, 0, 0);
+	input_set_abs_params(ts->input_dev, ABS_TOUCH_COST_TIME_ALGO, 0, MAX_TOUCH_COST_TIME, 0, 0);
 	input_set_abs_params(ts->input_dev, ABS_TOUCH_COST_TIME_DAEMON, 0, MAX_TOUCH_COST_TIME, 0, 0);*/
 	input_set_drvdata(ts->input_dev, ts);
 	input_set_drvdata(ts->kpd_input_dev, ts);
