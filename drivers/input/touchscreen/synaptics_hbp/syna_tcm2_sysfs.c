@@ -1929,7 +1929,7 @@ retry:
 
 	if ((data[0] == CMD_SET_DYNAMIC_CONFIG) && (payload_length == 3)) {
 		if ((data[3] == DC_GESTURE_TYPE_ENABLE) || (data[3] == DC_TOUCH_AND_HOLD)) {
-			if (!tcm->fp_active) {
+			if (!tcm->fp_active || tcm->fp_prevent) {
 				syna_pal_sleep_ms(50);
 				syna_sysfs_set_fingerprint_post(tcm);
 			} else {

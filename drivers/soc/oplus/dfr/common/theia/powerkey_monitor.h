@@ -60,6 +60,7 @@
 #define THEIA_PANEL_BLANK_VALUE              MTK_DISP_BLANK_POWERDOWN
 #endif
 
+#define SYSTEM_ID 20120
 #define PWKKEY_DCS_TAG                      "CriticalLog"
 #define PWKKEY_DCS_EVENTID                  "Theia"
 #define PWKKEY_BLACK_SCREEN_DCS_LOGTYPE     "black_screen_monitor"
@@ -81,12 +82,18 @@ struct pwrkey_monitor_data {
 	unsigned int error_count;
 #if IS_ENABLED(CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY)
 	struct notifier_block fb_notif;
+#if IS_ENABLED(CONFIG_OPLUS_MTK_DRM_SUB_NOTIFY)
+	struct notifier_block fb_notif_sub;
+#endif
 #endif
 	struct timer_list timer;
 	struct work_struct error_happen_work;
 #if IS_ENABLED(CONFIG_DRM_PANEL_NOTIFY) || IS_ENABLED(CONFIG_QCOM_PANEL_EVENT_NOTIFIER)
+	bool is_fold_dev;
 	struct drm_panel *active_panel;
+	struct drm_panel *active_panel_second;
 	void *cookie;
+	void *cookie_second;
 #endif
 	char error_id[64]; /*format: systemserver_pid:time_sec:time_usec*/
 };
@@ -113,6 +120,7 @@ ssize_t get_last_pwkey_stage(char *buf);
 ssize_t get_pwkey_stages(char *buf);
 void record_stage(const char *buf);
 int get_systemserver_pid(void);
+long get_timestamp_ms(void);
 bool is_slowkernel_skip(void);
 void set_timer_started(bool enable);
 void doPanic(void);
@@ -121,6 +129,7 @@ void theia_send_event_init(void);
 void theia_send_event_exit(void);
 #if IS_ENABLED(CONFIG_DRM_PANEL_NOTIFY) || IS_ENABLED(CONFIG_QCOM_PANEL_EVENT_NOTIFIER)
 int br_register_panel_event_notify(void);
+int br_register_panel_second_event_notify(void);
 #endif
 bool is_system_boot_completed(void);
 #endif /* __POWERKEY_MONITOR_H_ */

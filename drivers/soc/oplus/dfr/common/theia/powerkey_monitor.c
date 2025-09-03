@@ -4,6 +4,7 @@
  */
 #include "powerkey_monitor.h"
 #include "theia_kevent_kernel.h"
+#include <linux/time.h>
 
 #define POWER_MONITOR_DEBUG_PRINTK(a, arg...)\
 	do {\
@@ -13,6 +14,7 @@
 static char *flow_buf = NULL;
 static char *flow_buf_curr = NULL;
 static int flow_index = 0;
+static int stage_index = 0;
 static int stage_start = 0;
 #define FLOW_SIZE 16
 #define STAGE_BRIEF_SIZE 64
@@ -36,6 +38,13 @@ static spinlock_t record_stage_spinlock;
 int get_systemserver_pid(void)
 {
 	return systemserver_pid;
+}
+
+long get_timestamp_ms(void)
+{
+	struct timespec64 now;
+	ktime_get_real_ts64(&now);
+	return timespec64_to_ns(&now) / NSEC_PER_MSEC;
 }
 
 void set_timer_started(bool enable)
@@ -267,6 +276,11 @@ void record_stage(const char *buf)
 		return;
 	}
 
+	if (stage_index == (FLOW_SIZE -1)) {
+		POWER_MONITOR_DEBUG_PRINTK("record_stage buff size over, return");
+		return;
+	}
+
 	POWER_MONITOR_DEBUG_PRINTK("%s: buf:%s\n", __func__, buf);
 
 	spin_lock_irqsave(&record_stage_spinlock, flag);
@@ -276,6 +290,7 @@ void record_stage(const char *buf)
 
 	/* w lock index */
 	flow_index++;
+	stage_index++;
 	if(flow_index >= FLOW_SIZE) {
 		flow_index = 0;
 		flow_buf_curr = flow_buf;
@@ -301,6 +316,7 @@ static ssize_t theia_powerkey_report_proc_write(struct file *file,
 		return count;
 	}
 
+	buffer[STAGE_BRIEF_SIZE - 1] = '\0';
 	record_stage(buffer);
 	return count;
 }
@@ -393,6 +409,7 @@ void theia_pwk_stage_start(char *reason)
 {
 	POWER_MONITOR_DEBUG_PRINTK("theia_pwk_stage_start start %s:  %s   %x   flow_buf\n", flow_buf, flow_buf_curr, flow_index);
 	stage_start = flow_index;
+	stage_index = 0;
 	timer_started = true;
 	record_stage(reason);
 }

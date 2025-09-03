@@ -359,6 +359,7 @@ enum tcm_report_type {
 	/* custom report */
 	REPORT_LOG = 0x9f,
 	REPORT_POWER_STATE_INFO = 0xFE,
+	REPORT_DIFF  = 0xaa,
 };
 
 /**

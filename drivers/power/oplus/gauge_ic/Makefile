@@ -15,3 +15,6 @@ endif
 ifeq ($(CONFIG_OPLUS_CHARGER_OPTIGA),y)
 	obj-y   += oplus_optiga/
 endif
+ifeq ($(CONFIG_OPLUS_CHARGER_MAXIM),y)
+	obj-y   += oplus_maxim/
+endif

@@ -8,3 +8,7 @@ config OPLUS_DEVICE_INFO_MTK_PLATFORM
     help
       Say Y here if you have mtk-platform.
 
+config OPLUS_POGOPIN_FUNCTION
+    bool "OPLUS pogopin keyboard module used"
+    help
+      Say Y here if you have pogopin keyboard.

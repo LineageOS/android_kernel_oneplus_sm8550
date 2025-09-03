@@ -3,7 +3,8 @@
 #
 
 # Each configuration option enables a list of files.
-
+subdir-ccflags-$(CONFIG_TOUCHPANEL_MTK_PLATFORM) += -I$(srctree)/drivers/misc/mediatek/include/
+subdir-ccflags-$(CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY) += -I$(srctree)/drivers/misc/mediatek/include/
 
 
 TCM_CORE=tcm/

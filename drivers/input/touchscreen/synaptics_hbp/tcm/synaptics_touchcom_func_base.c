@@ -1503,6 +1503,7 @@ int syna_tcm_sleep(struct tcm_dev *tcm_dev, bool en)
 		LOGE("Invalid tcm device handle\n");
 		return _EINVAL;
 	}
+	LOGI(" %d\n", en);
 
 	command = (en) ? CMD_ENTER_DEEP_SLEEP : CMD_EXIT_DEEP_SLEEP;
 
