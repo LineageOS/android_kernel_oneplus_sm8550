@@ -241,6 +241,11 @@ config OPLUS_UFCS_SLAVE_NU2112A
 	help
 	  Say Y here to declare slave cp nu2112A support
 
+config OPLUS_CHARGER_MAXIM
+	bool "encryption ic maxim support"
+	help
+	  Say Y here to declare encryption ic maxim support
+
 config OPLUS_TPS6128XD_CHARGER
 	bool "tps6128xd support"
 	help

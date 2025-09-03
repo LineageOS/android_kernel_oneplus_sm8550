@@ -26,6 +26,14 @@
 #include "tcm/synaptics_touchcom_func_base.h"
 #include "syna_tcm2.h"
 
+#ifndef CONFIG_REMOVE_OPLUS_FUNCTION
+#ifdef CONFIG_TOUCHPANEL_MTK_PLATFORM
+#include<mt-plat/mtk_boot_common.h>
+#else
+#include <soc/oplus/system/boot_mode.h>
+#endif
+#endif
+
 /*debug_level - For touch panel driver debug_level
  * Output:
  * tp_hbp_debug:0, LEVEL_BASIC;
@@ -156,6 +164,19 @@ static ssize_t proc_fw_update_write(struct file *file,
 		return count;
 	}
 
+#ifndef CONFIG_REMOVE_OPLUS_FUNCTION
+#ifdef CONFIG_TOUCHPANEL_MTK_PLATFORM
+	if (tcm->boot_mode == KERNEL_POWER_OFF_CHARGING_BOOT)
+#else
+	if (tcm->boot_mode == MSM_BOOT_MODE__CHARGE)
+#endif
+#endif
+	 {
+		TP_INFO(tcm->tp_index,
+			"boot mode is MSM_BOOT_MODE__CHARGE,not need update tp firmware\n");
+		return count;
+	}
+
 	if (count > 4) {
 		TPD_INFO("%s:count > 4\n", __func__);
 		return count;
@@ -168,6 +189,11 @@ static ssize_t proc_fw_update_write(struct file *file,
 
 	if (kstrtoint(buf, 10, &val)) {
 		TP_INFO(tcm->tp_index, "%s: kstrtoint error\n", __func__);
+		return count;
+	}
+
+	if (IS_REMOVE == tcm->driver_current_state) {
+		LOGE("%s:driver is removed!!\n", __func__);
 		return count;
 	}
 
@@ -738,6 +764,61 @@ EXIT:
 
 DECLARE_PROC_OPS(proc_aging_test_ops, simple_open, proc_aging_test_read, proc_aging_test_write, NULL);
 
+void syna_dev_update_lpwg_mode(struct syna_tcm *tcm)
+{
+	struct syna_hw_interface *hw_if;
+	bool lpwg_enabled = false;
+	int retval = 0;
+
+	if (!tcm) {
+		return;
+	}
+
+	hw_if = tcm->hw_if;
+	lpwg_enabled = tcm->lpwg_enabled;
+	syna_dev_update_lpwg_status(tcm);
+
+	if (lpwg_enabled != tcm->lpwg_enabled
+			&& tcm->sub_pwr_state == SUB_PWR_SUSPEND_DONE) {
+		if (tcm->lpwg_enabled) {
+			if (tcm->tcm_dev->is_sleep) {
+				/* deep sleep, need to exit deepsleep firstly */
+				/* set irq back to active mode if not enabled yet */
+				/* enable irq */
+				if (hw_if->ops_enable_irq)
+					hw_if->ops_enable_irq(hw_if, true);
+
+				/* bring out of sleep mode. */
+				retval = syna_tcm_sleep(tcm->tcm_dev, false);
+				if (retval < 0) {
+					TPD_INFO("Fail to exit deep sleep\n");
+					return;
+				}
+			}
+			retval = syna_dev_enable_lowpwr_gesture(tcm, true);
+			if (retval < 0) {
+				TPD_INFO("Fail to enable low power gesture mode\n");
+				return;
+			}
+			TPD_INFO("low power gesture mode enabled\n");
+		} else {
+			/* enter sleep mode for non-LPWG cases */
+			retval = syna_tcm_sleep(tcm->tcm_dev, true);
+			if (retval < 0) {
+				TPD_INFO("Fail to enter deep sleep\n");
+				return;
+			}
+			/* once lpwg is enabled, irq should be alive.
+			* otherwise, disable irq in suspend.
+			*/
+			/* disable irq */
+			if ((hw_if->ops_enable_irq))
+				hw_if->ops_enable_irq(hw_if, false);
+			TPD_INFO("sleep mode enabled\n");
+		}
+	}
+}
+
 static ssize_t proc_fingerprint_active_read(struct file *file, char __user *buffer,
 				     size_t count, loff_t *ppos)
 {
@@ -760,17 +841,12 @@ static ssize_t proc_fingerprint_active_write(struct file *file,
 				      const char __user *buffer, size_t count, loff_t *ppos)
 {
 	struct syna_tcm *tcm = PDE_DATA(file_inode(file));
-	struct syna_hw_interface *hw_if;
 	int tmp = 0;
-	int retval = 0;
-	bool lpwg_enabled = false;
 	char buf[4] = {0};
 
 	if (!tcm) {
 		return count;
 	}
-
-	hw_if = tcm->hw_if;
 
 	tp_copy_from_user(buf, sizeof(buf), buffer, count, 2);
 
@@ -782,53 +858,61 @@ static ssize_t proc_fingerprint_active_write(struct file *file,
 	tcm->fp_active = !!tmp;
 	TPD_INFO("%s: fp_active = %d.\n", __func__, tcm->fp_active);
 
-	lpwg_enabled = tcm->lpwg_enabled;
-	syna_dev_update_lpwg_status(tcm);
-
-	if (lpwg_enabled != tcm->lpwg_enabled
-			&& tcm->sub_pwr_state == SUB_PWR_SUSPEND_DONE) {
-		if (tcm->lpwg_enabled) {
-			if (tcm->tcm_dev->is_sleep) {
-				/* deep sleep, need to exit deepsleep firstly */
-				/* set irq back to active mode if not enabled yet */
-				/* enable irq */
-				if (hw_if->ops_enable_irq)
-					hw_if->ops_enable_irq(hw_if, true);
-
-				/* bring out of sleep mode. */
-				retval = syna_tcm_sleep(tcm->tcm_dev, false);
-				if (retval < 0) {
-					TPD_INFO("Fail to exit deep sleep\n");
-					return count;
-				}
-			}
-			retval = syna_dev_enable_lowpwr_gesture(tcm, true);
-			if (retval < 0) {
-				TPD_INFO("Fail to enable low power gesture mode\n");
-				return count;
-			}
-			TPD_INFO("low power gesture mode enabled\n");
-		} else {
-			/* enter sleep mode for non-LPWG cases */
-			retval = syna_tcm_sleep(tcm->tcm_dev, true);
-			if (retval < 0) {
-				TPD_INFO("Fail to enter deep sleep\n");
-				return count;
-			}
-			/* once lpwg is enabled, irq should be alive.
-			* otherwise, disable irq in suspend.
-			*/
-			/* disable irq */
-			if ((hw_if->ops_enable_irq))
-				hw_if->ops_enable_irq(hw_if, false);
-			TPD_INFO("sleep mode enabled\n");
-		}
-	}
+	syna_dev_update_lpwg_mode(tcm);
 
 	return count;
 }
 
 DECLARE_PROC_OPS(proc_fingerprint_active_ops, simple_open, proc_fingerprint_active_read, proc_fingerprint_active_write, NULL);
+
+static ssize_t proc_fingerprint_prevent_read(struct file *file, char __user *buffer,
+				     size_t count, loff_t *ppos)
+{
+	struct syna_tcm *tcm = PDE_DATA(file_inode(file));
+	uint8_t ret = 0;
+	char page[PAGESIZE] = {0};
+
+	if (!tcm) {
+		return count;
+	}
+
+	TPD_INFO("%s: fp_prevent = %d.\n", __func__, tcm->fp_prevent);
+	snprintf(page, PAGESIZE - 1, "%d", tcm->fp_prevent);
+	ret = simple_read_from_buffer(buffer, count, ppos, page, strlen(page));
+
+	return ret;
+}
+
+static ssize_t proc_fingerprint_prevent_write(struct file *file,
+				      const char __user *buffer, size_t count, loff_t *ppos)
+{
+	struct syna_tcm *tcm = PDE_DATA(file_inode(file));
+	int tmp = 0;
+	char buf[4] = {0};
+
+	if (!tcm) {
+		return count;
+	}
+
+	tp_copy_from_user(buf, sizeof(buf), buffer, count, 2);
+
+	if (kstrtoint(buf, 10, &tmp)) {
+		TPD_INFO("%s: kstrtoint error\n", __func__);
+		return count;
+	}
+
+	mutex_lock(&tcm->mutex);
+	tcm->fp_prevent = !!tmp;
+	TPD_INFO("%s: fp_prevent = %d.\n", __func__, tcm->fp_prevent);
+
+	syna_dev_update_lpwg_mode(tcm);
+
+	mutex_unlock(&tcm->mutex);
+
+	return count;
+}
+
+DECLARE_PROC_OPS(proc_fingerprint_prevent_ops, simple_open, proc_fingerprint_prevent_read, proc_fingerprint_prevent_write, NULL);
 
 /*proc/touchpanel/debug_info/health_monitor*/
 #ifndef CONFIG_REMOVE_OPLUS_FUNCTION
@@ -885,6 +969,79 @@ static int health_monitor_open(struct inode *inode, struct file *file)
 
 DECLARE_PROC_OPS(tp_health_monitor_proc_fops, health_monitor_open, seq_read, health_monitor_control, single_release);
 
+/*proc/touchpanel/debug_info/data_limit*/
+static ssize_t tp_limit_data_write_func(struct file *file,
+				    const char __user *buffer, size_t count, loff_t *ppos)
+{
+	struct syna_tcm *tcm = PDE_DATA(file_inode(file));
+	struct debug_info_proc_operations *debug_info_ops = NULL;
+	int value = 0;
+	char buf[4] = {0};
+
+	TPD_DETAIL("%s tp_limit_data write enter\n", __func__);
+
+	if (!tcm) {
+		TPD_INFO("%s: tcm is NULL pointer\n", __func__);
+		return count;
+	}
+
+	if (!tcm->tp_data_record_support) {
+		return count;
+	}
+
+	if (count > 2) {
+		return count;
+	}
+
+	tp_copy_from_user(buf, sizeof(buf), buffer, count, 2);
+
+	if (kstrtoint(buf, 10, &value)) {
+		TP_INFO(tcm->tp_index, "%s: kstrtoint error\n", __func__);
+		return count;
+	}
+
+	debug_info_ops = (struct debug_info_proc_operations *)(tcm->debug_info_ops);
+	if (!debug_info_ops) {
+		TPD_INFO("%s:debug_info_ops is NULL pointer\n", __func__);
+		return 0;
+	}
+
+	if (!debug_info_ops->tp_limit_data_write) {
+		TPD_INFO("%s:debug_info_ops->tp_limit_data_write is NULL pointer\n", __func__);
+		return 0;
+	}
+
+	TPD_DETAIL("%s tp_limit_data write :%d\n", __func__, value);
+
+	mutex_lock(&tcm->mutex);
+	if (debug_info_ops->tp_limit_data_write) {
+		debug_info_ops->tp_limit_data_write(tcm, value);
+	}
+	mutex_unlock(&tcm->mutex);
+
+	return count;
+}
+
+static int tp_limit_data_read_func(struct seq_file *s, void *v)
+{
+	struct syna_tcm *tcm = s->private;
+
+	if (!tcm) {
+		return 0;
+	}
+
+	seq_printf(s, "%d\n", tcm->differ_read_every_frame);
+
+	return 0;
+}
+
+static int limit_data_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, tp_limit_data_read_func, PDE_DATA(inode));
+}
+
+DECLARE_PROC_OPS(tp_limit_data_proc_fops, limit_data_open, seq_read, tp_limit_data_write_func, single_release);
+
 /*proc/touchpanel/debug_info/baseline*/
 static int tp_baseline_debug_read_func(struct seq_file *s, void *v)
 {
@@ -929,11 +1086,6 @@ static int tp_baseline_debug_read_func(struct seq_file *s, void *v)
 		if (debug_info_ops->baseline_read) {
 			debug_info_ops->baseline_read(s, tcm);
 		}
-	}
-
-	/*step6: return to normal mode*/
-	if (syna_tcm_reset(tcm->tcm_dev) < 0) {
-		TPD_INFO("%s, %d, sw reset failed.\n", __func__, __LINE__);
 	}
 
 	mutex_unlock(&tcm->mutex);
@@ -1144,7 +1296,7 @@ static int init_debug_info_proc(struct syna_tcm *tcm,
 
 	tp_proc_node proc_debug_node[] = {
 #ifndef CONFIG_REMOVE_OPLUS_FUNCTION
-		/* {"data_limit", 0666, NULL, &tp_limit_data_proc_fops, tcm, false, true}, show limit data interface*/
+		{"data_limit", 0666, NULL, &tp_limit_data_proc_fops, tcm, false, tcm->tp_data_record_support},/* show limit data interface*/
 		{"baseline", 0666, NULL, &tp_baseline_data_proc_fops, tcm, false, true},/* show baseline data interface*/
 
 		{"delta", 0666, NULL, &tp_delta_data_proc_fops, tcm, false, true},/* show delta interface*/
@@ -1249,6 +1401,9 @@ int init_touchpanel_proc(struct syna_tcm *tcm,
 		},
 		{
 			"fingerprint_active", 0666, NULL, &proc_fingerprint_active_ops, tcm, false, true
+		},
+		{
+			"fingerprint_prevent", 0666, NULL, &proc_fingerprint_prevent_ops, tcm, false, true
 		},
 	};
 
