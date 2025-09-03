@@ -65,8 +65,8 @@
 
 #include "../../../drivers/power/supply/qcom/schgm-flash.h"
 #include "oplus_sy6974b.h"
-#include "../../../../../../kernel_platform/msm-kernel/drivers/usb/typec/pd/inc/tcpm_pd.h"
-#include "../../../../../../kernel_platform/msm-kernel/drivers/usb/typec/pd/inc/tcpm.h"
+#include "../pd_ext/inc/tcpm_pd.h"
+#include "../pd_ext/inc/tcpm.h"
 
 #define OPLUS_CHG_MONITOR_INTERVAL round_jiffies_relative(msecs_to_jiffies(5000))
 #define CC1_ATTACH 1
@@ -135,6 +135,11 @@ void __attribute__((weak)) splitchg_request_dpdm(struct sy697x *g_sy, bool enabl
 	return;
 }
 #endif
+
+void oplus_chg_pps_get_source_cap(void)
+{
+	return;
+}
 
 void splitchg_request_dpdm(struct sy697x *chg, bool enable)
 {

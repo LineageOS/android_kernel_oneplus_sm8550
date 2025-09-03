@@ -118,6 +118,18 @@ oplus_chg_v2-$(CONFIG_OPLUS_CHARGER_OPTIGA) += gauge_ic/oplus_optiga/SWI/Optiga_
 oplus_chg_v2-$(CONFIG_OPLUS_CHARGER_OPTIGA) += gauge_ic/oplus_optiga/SWI/Optiga_Swi.o
 oplus_chg_v2-$(CONFIG_OPLUS_CHARGER_OPTIGA) += gauge_ic/oplus_optiga/oplus_optiga.o
 
+oplus_chg_v2-$(CONFIG_OPLUS_CHARGER_MAXIM) += gauge_ic/oplus_maxim/oplus_ds28e30/1wire_protocol.o
+oplus_chg_v2-$(CONFIG_OPLUS_CHARGER_MAXIM) += gauge_ic/oplus_maxim/oplus_ds28e30/bignum.o
+oplus_chg_v2-$(CONFIG_OPLUS_CHARGER_MAXIM) += gauge_ic/oplus_maxim/oplus_ds28e30/deep_cover_coproc_sw.o
+oplus_chg_v2-$(CONFIG_OPLUS_CHARGER_MAXIM) += gauge_ic/oplus_maxim/oplus_ds28e30/ds28e30.o
+oplus_chg_v2-$(CONFIG_OPLUS_CHARGER_MAXIM) += gauge_ic/oplus_maxim/oplus_ds28e30/ecc_generate_key.o
+oplus_chg_v2-$(CONFIG_OPLUS_CHARGER_MAXIM) += gauge_ic/oplus_maxim/oplus_ds28e30/ecdsa_generic_api.o
+oplus_chg_v2-$(CONFIG_OPLUS_CHARGER_MAXIM) += gauge_ic/oplus_maxim/oplus_ds28e30/ecdsa_high.o
+oplus_chg_v2-$(CONFIG_OPLUS_CHARGER_MAXIM) += gauge_ic/oplus_maxim/oplus_ds28e30/sha256_stone.o
+oplus_chg_v2-$(CONFIG_OPLUS_CHARGER_MAXIM) += gauge_ic/oplus_maxim/oplus_ds28e30/ucl_rng.o
+oplus_chg_v2-$(CONFIG_OPLUS_CHARGER_MAXIM) += gauge_ic/oplus_maxim/oplus_ds28e30/ucl_sha256.o
+oplus_chg_v2-$(CONFIG_OPLUS_CHARGER_MAXIM) += gauge_ic/oplus_maxim/oplus_maxim.o
+
 oplus_chg_v2-$(CONFIG_OPLUS_CHG_AP_VOOCPHY) += voocphy/oplus_ap_voocphy.o
 oplus_chg_v2-$(CONFIG_OPLUS_CHG_ADSP_VOOCPHY) += voocphy/oplus_adsp_voocphy.o
 oplus_chg_v2-$(CONFIG_OPLUS_CHG_VOOCPHY_CHGLIB) += voocphy/chglib/oplus_chglib.o

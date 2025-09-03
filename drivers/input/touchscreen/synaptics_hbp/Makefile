@@ -5,7 +5,6 @@
 # Each configuration option enables a list of files.
 
 
-
 TCM_CORE=tcm/
 ccflags-y += -I$(srctree)/drivers/input/touchscreen/synaptics_hbp/
 ccflags-y += -I$(srctree)/drivers/input/touchscreen/synaptics_hbp/tcm/

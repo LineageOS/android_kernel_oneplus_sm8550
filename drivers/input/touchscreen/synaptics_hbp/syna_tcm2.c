@@ -62,6 +62,14 @@
 #include "touchpanel_autotest/touchpanel_autotest.h"
 #include "touch_comon_api/touch_comon_api.h"
 
+#ifndef CONFIG_REMOVE_OPLUS_FUNCTION
+#ifdef CONFIG_TOUCHPANEL_MTK_PLATFORM
+#include<mt-plat/mtk_boot_common.h>
+#else
+#include <soc/oplus/system/boot_mode.h>
+#endif
+#endif
+
 #include <linux/sched/signal.h> /* for function send_sig() */
 #if IS_ENABLED(CONFIG_DRM_OPLUS_PANEL_NOTIFY)
 #include <linux/msm_drm_notify.h>
@@ -134,7 +142,19 @@ static void syna_delta_read(struct seq_file *s, void *chip_data);
 static void syna_baseline_read(struct seq_file *s, void *chip_data);
 static void syna_main_register(struct seq_file *s, void *chip_data);
 static void syna_reserve_read(struct seq_file *s, void *chip_data);
+static void syna_tp_limit_data_write(void *chip_data, int count);
 static void syna_tcm_test_report(struct syna_tcm *tcm_info, u32 code);
+
+#ifndef CONFIG_REMOVE_OPLUS_FUNCTION
+#ifdef CONFIG_TOUCHPANEL_MTK_PLATFORM
+#ifndef CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY
+extern enum boot_mode_t get_boot_mode(void);
+#endif
+#else
+extern int get_boot_mode(void);
+#endif
+#endif
+
 /**
  * syna_dev_update_lpwg_status()
  *
@@ -148,7 +168,7 @@ static void syna_tcm_test_report(struct syna_tcm *tcm_info, u32 code);
  */
 void syna_dev_update_lpwg_status(struct syna_tcm *tcm)
 {
-	tcm->lpwg_enabled = (tcm->gesture_type || tcm->touch_and_hold || tcm->fp_active) ? true : false;
+	tcm->lpwg_enabled = (tcm->gesture_type || tcm->touch_and_hold || (tcm->fp_active && !tcm->fp_prevent)) ? true : false;
 	return;
 }
 
@@ -483,6 +503,15 @@ int syna_dev_disable_lbp_mode(struct syna_tcm *tcm)
 		LOGE("Fail to disable LBP mode via DC command\n");
 		goto exit;
 	}
+
+	/* enable log report to detect fw enter/exit force doze mode */
+	retval = syna_tcm_enable_report(tcm->tcm_dev, REPORT_LOG, true);
+	if (retval < 0) {
+		LOGE("Failed to enable log report\n");
+		goto exit;
+	}
+	LOGI("Enable log report\n");
+
 	//tcm->hbp_enabled = true;
 
 exit:
@@ -691,6 +720,11 @@ static void syna_dev_report_input_events(struct syna_tcm *tcm)
 	if (tcm->pwr_state == LOW_PWR)
 		goto exit;
 
+	if (tcm->char_dev_ref_count) {
+		LOGI("cdev already open, points report by daemon only.\n");
+		goto exit;
+	}
+
 	touch_count = 0;
 
 	for (idx = 0; idx < max_objects; idx++) {
@@ -748,7 +782,7 @@ static void syna_dev_report_input_events(struct syna_tcm *tcm)
 #ifndef TYPE_B_PROTOCOL
 			input_mt_sync(input_dev);
 #endif
-			LOGD("Finger %d: x = %d, y = %d\n", idx, x, y);
+			TPD_DETAIL("Finger %d: x = %d, y = %d\n", idx, x, y);
 			touch_count++;
 			break;
 		default:
@@ -1017,6 +1051,94 @@ static bool monitor_irq_bus_ready(struct syna_tcm *tcm)
 	return true;
 }
 
+#define SYNA_TCM_DIFF_BUF_LENGTH   3360 /* tx*rx*2 + (tx+rx)*2 */
+#define SYNA_TCM_MAX_CHANNEL_NUM 49
+static void syna_get_diff_data_record(struct syna_tcm *tcm)
+{
+	int tx_num = 0;
+	int rx_num = 0;
+	int i = 0, j = 0;
+	u8 *pdata_8;
+	char buf[200];
+
+	if (!tcm) {
+		LOGE("tcm is NULL pointer\n");
+		return;
+	}
+
+	if (!tcm->differ_read_every_frame || tp_hbp_debug != LEVEL_DEBUG) {
+		LOGD("differ_read_every_frame is false or debug_level < 2\n");
+		return;
+	}
+
+	tx_num = tcm->tx_num;
+	rx_num = tcm->rx_num;
+
+	LOGI("Header code = 0xaa, report size:%d, report length:%d\n",
+		tcm->event_data.buf_size, tcm->event_data.data_length);
+
+	pdata_8 = &tcm->event_data.buf[0];
+	if (tcm->event_data.data_length > SYNA_TCM_DIFF_BUF_LENGTH || tcm->event_data.data_length != (2 * (tx_num * rx_num + tx_num + rx_num)) || \
+			(tx_num > SYNA_TCM_MAX_CHANNEL_NUM) || (rx_num > SYNA_TCM_MAX_CHANNEL_NUM)) {
+		LOGE("report length %d tx_num:%d rx_num:%d error\n", tcm->event_data.data_length, tx_num, rx_num);
+		return;
+	}
+
+	memset(buf, 0, sizeof(buf));
+	LOGI("diff data\n");
+	for (i = 0; i < tx_num; i++) {
+		for (j = 0; j < rx_num; j++) {
+			snprintf(&buf[4 * j], 5, "%02x%02x", pdata_8[0], pdata_8[1]);
+			pdata_8 += 2;
+		}
+		LOGI("diff_record:[%2d]%s", i, buf);
+	}
+	LOGI("sc_nomal diff data:\n");
+	for (i = 0; i < rx_num; i++) {
+		snprintf(&buf[4 * i], 5, "%02x%02x", pdata_8[0], pdata_8[1]);
+		pdata_8 += 2;
+	}
+	LOGI("diff_record:[RX]%s", buf);
+	for (i = 0; i < tx_num; i++) {
+		snprintf(&buf[4 * i], 5, "%02x%02x", pdata_8[0], pdata_8[1]);
+		pdata_8 += 2;
+	}
+	LOGI("diff_record:[TX]%s", buf);
+	LOGI("end\n");
+
+	return;
+}
+
+static void syna_get_report_log_data(struct syna_tcm *tcm)
+{
+	u8 force_doze;
+
+	if (!tcm) {
+		LOGI("tcm is NULL pointer\n");
+		return;
+	}
+
+	LOGI("Header code = 0x9f, data_length = %u, buf = [%*ph]\n",
+			tcm->event_data.data_length, tcm->event_data.data_length, tcm->event_data.buf);
+
+	force_doze = tcm->event_data.buf[0];
+	if (force_doze) {
+		if (tcm->health_monitor_support) {
+			tp_healthinfo_report(&tcm->monitor_data, HEALTH_REPORT, "fw_enter_force_doze_count");
+		}
+		tcm->enter_force_doze = true;
+		LOGI("fw enter force doze\n");
+	} else {
+		if (tcm->health_monitor_support) {
+			tp_healthinfo_report(&tcm->monitor_data, HEALTH_REPORT, "fw_exit_force_doze_count");
+		}
+		tcm->enter_force_doze = false;
+		LOGI("fw exit force doze\n");
+	}
+
+	return;
+}
+
 
 /**
  * syna_dev_isr()
@@ -1080,17 +1202,51 @@ static irqreturn_t syna_dev_isr(int irq, void *data)
 		syna_tcm_test_report(tcm, code);
 		goto exit;
 	}
+
 #ifdef ENABLE_EXTERNAL_FRAME_PROCESS
 	if (tcm->report_to_queue[code] == EFP_ENABLE) {
 		syna_tcm_buf_lock(&tcm->tcm_dev->external_buf);
 		syna_cdev_update_report_queue(tcm, code,
 		    &tcm->tcm_dev->external_buf);
 		syna_tcm_buf_unlock(&tcm->tcm_dev->external_buf);
+
+		/* Count the number of IRQs reported to usersapce when screen off. */
+		switch (tcm->sub_pwr_state) {
+		case SUB_PWR_EARLY_SUSPENDING:
+			if (tcm->health_monitor_support) {
+				tp_healthinfo_report(&tcm->monitor_data, HEALTH_REPORT, "early_suspending_report_to_fifo_cnt");
+			}
+			break;
+		case SUB_PWR_SUSPENDING:
+			if (tcm->health_monitor_support) {
+				tp_healthinfo_report(&tcm->monitor_data, HEALTH_REPORT, "suspending_report_to_fifo_cnt");
+			}
+			break;
+		case SUB_PWR_SUSPEND_DONE:
+			if (tcm->health_monitor_support) {
+				tp_healthinfo_report(&tcm->monitor_data, HEALTH_REPORT, "suspend_done_report_to_fifo_cnt");
+			}
+			break;
+		default:
+			break;
+		}
+
 #ifndef REPORT_CONCURRENTLY
 		goto exit;
 #endif
 	}
 #endif
+
+	if (tcm->tp_data_record_support) {
+		if (code == REPORT_DIFF) {
+			syna_get_diff_data_record(tcm);
+		}
+	}
+
+	if (code == REPORT_LOG) {
+		syna_get_report_log_data(tcm);
+	}
+
 	/* report input event only when receiving a touch report */
 
 	if (code == REPORT_TOUCH) {
@@ -1779,6 +1935,15 @@ static void syna_speedup_resume(struct work_struct *work)
 
 		if (hw_if->ops_hw_reset) {
 			hw_if->ops_hw_reset(hw_if);
+
+			if (tcm->tp_data_record_support && tcm->differ_read_every_frame) {
+				retval = syna_tcm_set_dynamic_config(tcm->tcm_dev, 0xF3, 1, RESP_IN_ATTN);
+				if (retval < 0) {
+					LOGE("Fail to enable DC_SET_DIFFER_READ\n");
+				}
+				LOGI("Enable DC_SET_DIFFER_READ after resume\n");
+				tcm->differ_read_every_frame = true;
+			}
 		} else {
 			retval = syna_tcm_reset(tcm->tcm_dev);
 			if (retval < 0) {
@@ -2568,6 +2733,7 @@ static struct debug_info_proc_operations syna_debug_proc_ops = {
 	.baseline_blackscreen_read = syna_baseline_read,
 	.main_register_read = syna_main_register,
 	.reserve_read  = syna_reserve_read,
+	.tp_limit_data_write = syna_tp_limit_data_write,
 };
 
 static void syna_start_aging_test(void *chip_data)
@@ -2804,6 +2970,9 @@ static int init_chip_dts(struct device *dev, void *chip_data)
 
 	TP_INFO(tcm->tp_index, "dts_max_x = %d, dts_max_y = %d \n", tcm->dts_max_x, tcm->dts_max_y);
 
+	tcm->tp_data_record_support = of_property_read_bool(np, "tp_data_record_support");
+	TP_INFO(tcm->tp_index, "tp_data_record_support = %d \n", tcm->tp_data_record_support);
+
 	/* S3910_PANEL7 */
 	init_panel_config(dev, tcm);
 
@@ -3033,6 +3202,11 @@ static int syna_dev_probe(struct platform_device *pdev)
 		goto err_manufacture_info;
 	}
 
+#ifndef CONFIG_REMOVE_OPLUS_FUNCTION
+	/*step10 : FTM process*/
+	tcm->boot_mode = get_boot_mode();
+#endif
+
 	syna_tcm_buf_init(&tcm->event_data);
 
 	syna_pal_mutex_alloc(&tcm->tp_event_mutex);
@@ -3092,6 +3266,7 @@ static int syna_dev_probe(struct platform_device *pdev)
 	tcm->waiting_frame = 0;
 	tcm->use_short_frame_waiting = 0;
 	tcm->primary_timestamp_enabled = 1;
+	tcm->differ_read_every_frame = false;
 
 	platform_set_drvdata(pdev, tcm);
 
@@ -3400,6 +3575,7 @@ enum dynamic_config_id {
 	DC_GRIP_ABS_DARK_V = 0xE4,
 	DC_GRIP_ABS_DARK_SEL = 0xE5,
 	DC_SET_REPORT_FRE = 0xE6,
+	DC_SET_DIFFER_READ = 0xF3,
 	DC_GESTURE_MASK = 0xFE,
 	DC_LOW_TEMP_ENABLE = 0xFD,
 };
@@ -3973,6 +4149,40 @@ static void syna_reserve_read(struct seq_file *s, void *chip_data)
 	return;
 }
 
+static void syna_tp_limit_data_write(void *chip_data, int count)
+{
+	int retval;
+	struct syna_tcm *tcm_info = (struct syna_tcm *)chip_data;
+
+	if (!tcm_info) {
+		TPD_INFO("tcm_info is NULL pointer\n");
+		return;
+	}
+
+	if (!tcm_info->tp_data_record_support) {
+		TP_INFO(tcm_info->tp_index, "tp data record not support! \n");
+		return;
+	}
+
+	if (count) {
+		retval = syna_tcm_set_dynamic_config(tcm_info->tcm_dev, DC_SET_DIFFER_READ, 1, RESP_IN_ATTN);
+
+		if (retval < 0) {
+			TP_INFO(tcm_info->tp_index, "Failed to set differ read true\n");
+		}
+		tcm_info->differ_read_every_frame = true;
+	} else {
+		retval = syna_tcm_set_dynamic_config(tcm_info->tcm_dev, DC_SET_DIFFER_READ, 0, RESP_IN_ATTN);
+
+		if (retval < 0) {
+			TP_INFO(tcm_info->tp_index, "Failed to set differ read false\n");
+		}
+		tcm_info->differ_read_every_frame = false;
+	}
+	TP_INFO(tcm_info->tp_index, "tp data record set to %u\n", count);
+	return;
+}
+
 static int syna_spi_suspend(struct device *dev)
 {
 	struct syna_tcm *tcm = dev_get_drvdata(dev);
@@ -4125,6 +4335,10 @@ static void __exit syna_dev_module_exit(void)
 
 module_init(syna_dev_module_init);
 module_exit(syna_dev_module_exit);
+
+#if IS_ENABLED(CONFIG_DRM_OPLUS_PANEL_NOTIFY) || IS_ENABLED(CONFIG_QCOM_PANEL_EVENT_NOTIFIER)
+MODULE_SOFTDEP("pre: msm_drm");
+#endif
 
 MODULE_AUTHOR("Synaptics, Inc.");
 MODULE_DESCRIPTION("Synaptics TCM Touch Driver");

@@ -29,6 +29,8 @@
 #include <oplus_chg.h>
 #include <oplus_mms_gauge.h>
 
+#include "test-kit.h"
+
 static int tps6128xd_debug_track = 0;
 module_param(tps6128xd_debug_track, int, 0644);
 MODULE_PARM_DESC(tps6128xd_debug_track, "debug track");

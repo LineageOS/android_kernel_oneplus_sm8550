@@ -273,6 +273,7 @@ enum battery_property_id {
 	BATT_SET_USED_FLAG,
 	BATT_DEEP_DISCHG_LAST_CC,
 	BATT_GET_UFCS_RUNNING_STATE,
+	BATT_VOLT_MIN,
 #endif
 	BATT_PROP_MAX,
 };
@@ -347,6 +348,7 @@ enum usb_property_id {
 	USB_SNS_STATUS,
 	USB_SET_UFCS_SM_PERIOD,
 	USB_SET_RERUN_AICL,
+	USB_SET_PLC_STATUS,
 #endif /*OPLUS_FEATURE_CHG_BASIC*/
 	USB_PROP_MAX,
 };
@@ -404,6 +406,25 @@ enum OTG_BOOST_SOURCE {
 enum WLS_BOOST_SOURCE {
 	WLS_BOOST_SOURCE_PMIC_OTG,
 	WLS_BOOST_SOURCE_PMIC_WLS,
+};
+
+enum charging_status {
+	CHARGING_TYPE_UNKNOW,
+	CHARGING_TYPE_VOOC_SVOOC,
+	CHARGING_TYPE_OPLUS_UFCS,
+	CHARGING_TYPE_OPLUS_PPS,
+	CHARGING_TYPE_THIRD_UFCS,
+	CHARGING_TYPE_THIRD_PPS,
+	CHARGING_TYPE_FFC,
+	CHARGING_TYPE_MAX,
+};
+
+enum qbg_full_temp_region {
+	QBG_TEMP_COLD,
+	QBG_TEMP_COOL,
+	QBG_TEMP_NORMAL,
+	QBG_TEMP_WARM,
+	QBG_TEMP_MAX,
 };
 
 enum OEM_MISC_CTL_CMD {
@@ -588,6 +609,8 @@ struct battery_chg_dev {
 	struct oplus_mms		*gauge_topic;
 	struct oplus_mms		*wls_topic;
 	struct oplus_mms		*err_topic;
+	struct oplus_mms		*plc_topic;
+	struct mms_subscribe		*plc_subs;
 	struct votable			*chg_disable_votable;
 	struct mutex			chg_en_lock;
 	bool 				    chg_en;
@@ -608,13 +631,13 @@ struct battery_chg_dev {
 	int				last_charger_type;
 	int				adsp_crash;
 	atomic_t			state;
-	int				g_icl_ma;
 	int				rerun_max;
 	int				pd_chg_volt;
 	struct work_struct		subsys_up_work;
 	struct work_struct		usb_type_work;
 #ifdef OPLUS_FEATURE_CHG_BASIC
 	int ccdetect_irq;
+	struct work_struct	plc_status_update_work;
 	struct delayed_work	publish_close_cp_item_work;
 	struct delayed_work	suspend_check_work;
 	struct delayed_work	adsp_voocphy_status_work;
@@ -632,6 +655,7 @@ struct battery_chg_dev {
 	struct delayed_work	oem_lcm_en_check_work;
 	struct delayed_work	ctrl_lcm_frequency;
 	struct delayed_work	sourcecap_done_work;
+	struct delayed_work	sourcecap_suspend_recovery_work;
 	u32			oem_misc_ctl_data;
 	bool			oem_usb_online;
 	bool			oem_lcm_check;
@@ -716,6 +740,7 @@ struct battery_chg_dev {
 	struct completion	 ufcs_read_ack;
 
 	bool calib_info_init;
+	bool real_mvolts_min_support;
 	int cp_work_mode;
 	bool gauge_data_initialized;
 	int otg_scheme;
@@ -734,6 +759,9 @@ struct battery_chg_dev {
 	struct delayed_work check_adspfg_status;
 	struct delayed_work hboost_notify_work;
 #endif
+	int batt_full_para[CHARGING_TYPE_MAX][QBG_TEMP_MAX];
+	int batt_full_temp[QBG_TEMP_MAX];
+	bool batt_full_method_new;
 };
 
 /**********************************************************************
@@ -771,7 +799,7 @@ int oplus_adsp_voocphy_reset_again(void);
 int oplus_adsp_batt_curve_current(void);
 void oplus_chg_set_match_temp_ui_soc_to_voocphy(void);
 void oplus_chg_set_ap_fastchg_allow_to_voocphy(int allow);
-int oplus_adsp_voocphy_set_cool_down(int cool_down);
+int oplus_adsp_voocphy_set_cool_down(int cool_down, int curr_ma);
 int oplus_adsp_voocphy_get_bcc_max_current(void);
 int oplus_adsp_voocphy_get_bcc_min_current(void);
 int oplus_adsp_voocphy_get_atl_last_geat_current(void);

@@ -1012,6 +1012,18 @@ int oplus_gauge_check_bqfs_fw(void)
 	return rc;
 }
 
+int oplus_gauge_bqfs_data_check(void)
+{
+	int rc = 0;
+	if (!g_gauge_chip)
+		return rc;
+
+	if (g_gauge_chip->gauge_ops && g_gauge_chip->gauge_ops->bqfs_data_check)
+		rc = g_gauge_chip->gauge_ops->bqfs_data_check();
+
+	return rc;
+}
+
 void oplus_gauge_get_device_name(u8 *name, int len)
 {
 	if (g_gauge_chip && g_gauge_chip->device_name && name)
@@ -1042,23 +1054,66 @@ int oplus_gauge_get_qmax_v1(int *qmax1, int *qmax2)
 
 int oplus_gauge_get_fcc(int *fcc1, int *fcc2)
 {
-	if (!g_gauge_chip || !g_gauge_chip->gauge_ops || !g_gauge_chip->gauge_ops->get_batt_fcc)
+	if (!g_gauge_chip || !g_gauge_chip->gauge_ops) {
 		return -1;
-	return g_gauge_chip->gauge_ops->get_batt_fcc(fcc1, fcc2);
+	} else {
+		if (g_gauge_chip->gauge_ops->get_batt_fcc)
+			g_gauge_chip->gauge_ops->get_batt_fcc(fcc1, fcc2);
+		else if (g_gauge_chip->gauge_ops->get_battery_fcc) {
+			*fcc1 = g_gauge_chip->gauge_ops->get_battery_fcc();
+			if (g_sub_gauge_chip && g_sub_gauge_chip->gauge_ops && g_sub_gauge_chip->gauge_ops->get_battery_fcc) {
+				*fcc2 = g_sub_gauge_chip->gauge_ops->get_battery_fcc();
+			}
+			else
+				*fcc2 = 0;
+		}
+		else
+			return -1;
+	}
+	return 0;
 }
 
 int oplus_gauge_get_cc(int *cc1, int *cc2)
 {
-	if (!g_gauge_chip || !g_gauge_chip->gauge_ops || !g_gauge_chip->gauge_ops->get_batt_cc)
+	if (!g_gauge_chip || !g_gauge_chip->gauge_ops) {
 		return -1;
-	return g_gauge_chip->gauge_ops->get_batt_cc(cc1, cc2);
+	} else {
+		if (g_gauge_chip->gauge_ops->get_batt_cc)
+			g_gauge_chip->gauge_ops->get_batt_cc(cc1, cc2);
+		else if (g_gauge_chip->gauge_ops->get_battery_cc) {
+			*cc1 = g_gauge_chip->gauge_ops->get_battery_cc();
+			if (g_sub_gauge_chip && g_sub_gauge_chip->gauge_ops && g_sub_gauge_chip->gauge_ops->get_battery_cc) {
+				*cc2 = g_sub_gauge_chip->gauge_ops->get_battery_cc();
+			}
+			else
+				*cc2 = 0;
+		}
+		else
+			return -1;
+	}
+	return 0;
 }
 
 int oplus_gauge_get_soh(int *soh1, int *soh2)
 {
-	if (!g_gauge_chip || !g_gauge_chip->gauge_ops || !g_gauge_chip->gauge_ops->get_batt_soh)
+	if (!g_gauge_chip || !g_gauge_chip->gauge_ops)
 		return -1;
-	return g_gauge_chip->gauge_ops->get_batt_soh(soh1, soh2);
+	else {
+		if (g_gauge_chip->gauge_ops->get_batt_soh) {
+			g_gauge_chip->gauge_ops->get_batt_soh(soh1, soh2);
+		}
+		else if (g_gauge_chip->gauge_ops->get_battery_soh) {
+			*soh1 = g_gauge_chip->gauge_ops->get_battery_soh();
+			if (g_sub_gauge_chip && g_sub_gauge_chip->gauge_ops && g_sub_gauge_chip->gauge_ops->get_battery_soh) {
+				*soh2 = g_sub_gauge_chip->gauge_ops->get_battery_soh();
+			}
+			else
+				*soh2 = 0;
+		}
+		else
+			return -1;
+	}
+	return 0;
 }
 
 int oplus_gauge_get_calib_time(int *dod_calib_time, int *qmax_calib_time, int gauge_index)
@@ -1073,6 +1128,12 @@ void oplus_gauge_cal_model_check(bool ffc_state)
 	if (!g_gauge_chip)
 		return;
 	else {
+		if (oplus_switching_support_parallel_chg()) {
+			if (g_sub_gauge_chip && g_sub_gauge_chip->gauge_ops &&
+					g_sub_gauge_chip->gauge_ops->cal_model_check) {
+				g_sub_gauge_chip->gauge_ops->cal_model_check(ffc_state);
+			}
+		}
 		if (g_gauge_chip->gauge_ops && g_gauge_chip->gauge_ops->cal_model_check) {
 			return g_gauge_chip->gauge_ops->cal_model_check(ffc_state);
 		}
@@ -1080,3 +1141,154 @@ void oplus_gauge_cal_model_check(bool ffc_state)
 	}
 }
 
+int oplus_gauge_get_bat_info_manu_date(char *info, int len)
+{
+	if (!g_gauge_chip) {
+		return -EINVAL;
+	} else {
+		if (g_gauge_chip->gauge_ops && g_gauge_chip->gauge_ops->get_batt_manu_date) {
+			return g_gauge_chip->gauge_ops->get_batt_manu_date(info, len);
+		}
+		return 0;
+	}
+}
+
+int oplus_gauge_get_bat_info_first_usage_date(char *info, int len)
+{
+	if (!g_gauge_chip) {
+		return -EINVAL;
+	} else {
+		if (g_gauge_chip->gauge_ops && g_gauge_chip->gauge_ops->get_batt_first_usage_date) {
+			return g_gauge_chip->gauge_ops->get_batt_first_usage_date(info, len);
+		}
+		return 0;
+	}
+}
+
+int oplus_gauge_set_bat_info_first_usage_date(const char *info)
+{
+	if (!g_gauge_chip) {
+		return -EINVAL;
+	} else {
+		if (g_gauge_chip->gauge_ops && g_gauge_chip->gauge_ops->set_batt_first_usage_date) {
+			return g_gauge_chip->gauge_ops->set_batt_first_usage_date(info);
+		}
+		return 0;
+	}
+}
+
+int oplus_pack_gauge_get_seal_flag(void)
+{
+	if (!g_gauge_chip) {
+		return -EINVAL;
+	} else {
+		if (g_gauge_chip->gauge_ops && g_gauge_chip->gauge_ops->get_seal_flag) {
+			return g_gauge_chip->gauge_ops->get_seal_flag();
+		}
+		return 0;
+	}
+}
+
+int oplus_pack_gauge_set_seal_flag(int seal_flag)
+{
+	if (!g_gauge_chip) {
+		return -EINVAL;
+	} else {
+		if (g_gauge_chip->gauge_ops && g_gauge_chip->gauge_ops->set_seal_flag) {
+			return g_gauge_chip->gauge_ops->set_seal_flag(seal_flag);
+		}
+		return 0;
+	}
+}
+
+int oplus_gauge_get_battinfo_ui_cc(void)
+{
+	if (!g_gauge_chip) {
+		return -EINVAL;
+	} else {
+		if (g_gauge_chip->gauge_ops && g_gauge_chip->gauge_ops->get_batt_ui_cc) {
+			return g_gauge_chip->gauge_ops->get_batt_ui_cc();
+		}
+		return 0;
+	}
+}
+
+int oplus_gauge_set_battinfo_ui_cc(int ui_cc)
+{
+	if (!g_gauge_chip) {
+		return -EINVAL;
+	} else {
+		if (g_gauge_chip->gauge_ops && g_gauge_chip->gauge_ops->set_batt_ui_cc) {
+			return g_gauge_chip->gauge_ops->set_batt_ui_cc(ui_cc);
+		}
+		return 0;
+	}
+}
+
+int oplus_gauge_get_battinfo_ui_soh(void)
+{
+	if (!g_gauge_chip) {
+		return -EINVAL;
+	} else {
+		if (g_gauge_chip->gauge_ops && g_gauge_chip->gauge_ops->get_batt_ui_soh) {
+			return g_gauge_chip->gauge_ops->get_batt_ui_soh();
+		}
+		return 0;
+	}
+}
+
+int oplus_gauge_set_battinfo_ui_soh(int ui_soh)
+{
+	if (!g_gauge_chip) {
+		return -EINVAL;
+	} else {
+		if (g_gauge_chip->gauge_ops && g_gauge_chip->gauge_ops->set_batt_ui_soh) {
+			return g_gauge_chip->gauge_ops->set_batt_ui_soh(ui_soh);
+		}
+		return 0;
+	}
+}
+
+int oplus_gauge_get_battinfo_used_flag(void)
+{
+	if (!g_gauge_chip) {
+		return -EINVAL;
+	} else {
+		if (g_gauge_chip->gauge_ops && g_gauge_chip->gauge_ops->get_batt_used_flag) {
+			return g_gauge_chip->gauge_ops->get_batt_used_flag();
+		}
+		return 0;
+	}
+}
+
+int oplus_gauge_set_battinfo_used_flag(int used_flag)
+{
+	if (!g_gauge_chip) {
+		return -EINVAL;
+	} else {
+		if (g_gauge_chip->gauge_ops && g_gauge_chip->gauge_ops->set_batt_used_flag) {
+			return g_gauge_chip->gauge_ops->set_batt_used_flag(used_flag);
+		}
+		return 0;
+	}
+}
+
+int oplus_gauge_get_bat_info_sn(char *sn_buff, int size_buffer)
+{
+	int rc = 0;
+	int len = 0;
+
+	if (!g_gauge_chip) {
+		return -EINVAL;
+	} else {
+		if (g_gauge_chip->gauge_ops && g_gauge_chip->gauge_ops->get_battinfo_sn) {
+			rc = g_gauge_chip->gauge_ops->get_battinfo_sn(sn_buff, size_buffer);
+			if (rc < 0) {
+				return -EINVAL;
+			}
+			len = rc;
+			return len;
+		}
+	}
+	return 0;
+}

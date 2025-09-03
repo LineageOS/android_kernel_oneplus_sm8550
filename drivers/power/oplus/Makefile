@@ -31,5 +31,10 @@ endif
 endif
 
 obj-$(CONFIG_OPLUS_DYNAMIC_CONFIG) += config/
+obj-$(CONFIG_OPLUS_WIRELESS_PEN) += wireless_pen/
+
+ifdef CONFIG_OPLUS_PD_EXT_SUPPORT
+obj-$(CONFIG_TCPC_CLASS) += pd_ext/
+endif
 
 KBUILD_CFLAGS += -Wframe-larger-than=8192
