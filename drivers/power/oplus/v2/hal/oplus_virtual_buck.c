@@ -29,7 +29,9 @@
 #include <oplus_chg_ic.h>
 #include <linux/nvmem-consumer.h>
 
+#if IS_ENABLED(CONFIG_OPLUS_CHG_TEST_KIT)
 #include "test-kit.h"
+#endif
 
 #define DISCONNECT			0
 #define STANDARD_TYPEC_DEV_CONNECT	BIT(0)

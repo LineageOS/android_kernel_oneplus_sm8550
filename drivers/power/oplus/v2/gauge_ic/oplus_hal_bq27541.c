@@ -62,7 +62,9 @@
 #include <oplus_mms.h>
 #include <oplus_mms_gauge.h>
 #include <oplus_mms_wired.h>
+#if IS_ENABLED(CONFIG_OPLUS_CHG_TEST_KIT)
 #include "test-kit.h"
+#endif
 
 #include "oplus_hal_bq27541.h"
 #include "oplus_hal_nfg8011b.h"
