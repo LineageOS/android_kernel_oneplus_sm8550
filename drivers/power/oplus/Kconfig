@@ -160,3 +160,4 @@ config OPLUS_CHARGER_WIRELESS_RA9530
 endif #OPLUS_CHARGER
 
 source "$(KCONFIG_EXT_PREFIX)drivers/power/oplus/config/Kconfig"
+source "$(KCONFIG_EXT_PREFIX)drivers/power/oplus/wireless_pen/Kconfig"

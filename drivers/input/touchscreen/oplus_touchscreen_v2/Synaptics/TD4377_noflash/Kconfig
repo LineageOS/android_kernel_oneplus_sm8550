@@ -1,0 +1,7 @@
+#
+# Synaptics td4377 touchscreen driver configuration
+#
+config TOUCHPANEL_SYNAPTICS_TD4377_NOFLASH
+    tristate "TP td4377 IC enable or not for  OPLUS"
+    help
+      say Y to enable driver for Touchpanel using synaptics td4377

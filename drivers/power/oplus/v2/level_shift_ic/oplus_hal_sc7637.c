@@ -26,6 +26,7 @@
 #include <oplus_chg_ic.h>
 #include <oplus_batt_bal.h>
 #include "oplus_hal_sc7637.h"
+#include "test-kit.h"
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_CHG_DEBUG_KIT)
 #include <debug-kit.h>
 #endif

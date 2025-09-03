@@ -29,6 +29,8 @@
 #include <oplus_chg_ic.h>
 #include <linux/nvmem-consumer.h>
 
+#include "test-kit.h"
+
 #define DISCONNECT			0
 #define STANDARD_TYPEC_DEV_CONNECT	BIT(0)
 #define OTG_DEV_CONNECT			BIT(1)

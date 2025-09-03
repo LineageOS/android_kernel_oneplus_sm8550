@@ -25,7 +25,18 @@
 #if !(defined(CONFIG_MTK_PLATFORM) || defined(CONFIG_OPLUS_DEVICE_INFO_MTK_PLATFORM))
 #include <soc/qcom/of_common.h>
 #endif
-
+#include <linux/string.h>
+#define DDR_MR_SIZE_COUNT 5 /* MR5|MR6|MR7|MR8|DDR_Size */
+#define DDR_INFO_LEN 32
+#define DDR_MR5 5
+#define DDR_MR6 6
+#define DDR_MR7 7
+#define DDR_MR8_DENSITY 8
+#define DDR_SIZE_CASE 257
+#define SAMSUNG_VENDOR_ID 1
+#define HYNIX_VENDOR_ID 6
+#define CXMT_VENDOR_ID 19
+#define MICRON_VENDOR_ID 255
 #define DEVINFO_NAME "devinfo"
 #define MAX_CMDLINE_PARAM_LEN 1024
 #define dev_msg(msg, arg...) pr_err("devinfo:" msg, ##arg);
@@ -34,10 +45,14 @@
 #define MAIN_BOARD_SUPPORT 256
 
 #if (defined(CONFIG_MTK_PLATFORM) || defined(CONFIG_OPLUS_DEVICE_INFO_MTK_PLATFORM))
+#define DRAMC_MAX_RK 2
+#define DRAMC_MR_CNT 4
+#define DRAMC_SIZE_UNIT 128/1024
 struct mr_info_t {
 	unsigned int mr_index;
 	unsigned int mr_value;
 };
+static struct mr_info_t *mr_info = NULL;
 #endif
 
 static struct proc_dir_entry *g_parent = NULL;
@@ -59,6 +74,58 @@ MODULE_PARM_DESC(ddr_info,
 static struct device_info *g_dev_info = NULL;
 static int reinit_aboard_id(struct device *dev,
 			    struct manufacture_info *info);
+
+
+struct process_info {
+	uint32_t process_id;
+	const char process_name[8];
+};
+
+struct vendor_process {
+	uint32_t vendor_id;
+	const char *vendor_name;
+	const struct process_info *process_info;
+};
+
+static const struct process_info samsung_process[] = {
+	{ 7, "D1y" },
+	{ 9, "D1a" },
+	{ 10, "D1b" },
+	/* D1z user mr6&mr8 judge, ((mr6 & 0xFF) | mr8) */
+	{ 12, "D1z" },
+	{ 13, "D1z" },
+	{ 14, "D1zP" },
+	{ 0, "Unknown"},
+};
+
+static const struct process_info hynix_process[] = {
+	{ 6, "D1y" },
+	{ 7, "D1z" },
+	{ 8, "D1a" },
+	{ 136, "D1aP" },
+	{ 0, "Unknown"},
+};
+
+static const struct process_info micron_process[] = {
+	{ 5, "D1y" },
+	{ 6, "D1z" },
+	{ 7, "D1a" },
+	{ 0, "Unknown"},
+};
+
+static const struct process_info cxmt_process[] = {
+	{ 2, "D1y" },
+	{ 3, "D1y" },
+	{ 5, "D1z" },
+	{ 0, "Unknown"},
+};
+
+static const struct vendor_process vendor_processes[] = {
+	{ 1, "Samsung", samsung_process },
+	{ 6, "Hynix", hynix_process },
+	{ 19, "Cxmt", cxmt_process },
+	{ 255, "Micron", micron_process },
+};
 
 bool
 check_id_match(const char *label, const char *id_match, int id)
@@ -164,13 +231,16 @@ static int devinfo_read_emmc_func(struct seq_file *s, void *v)
 		break;
 	case 0xD6:
 		if (NULL != strstr(mmc->card->cid.prod_name, "C9C761") || NULL != strstr(mmc->card->cid.prod_name, "C9C762")
-			|| NULL != strstr(mmc->card->cid.prod_name, "C9C764")) {
+			|| NULL != strstr(mmc->card->cid.prod_name, "C9C764") || NULL != strstr(mmc->card->cid.prod_name, "C9A612")) {
 			manufacture = "FORESEE";
 		} else {
 			manufacture = "HG";
 		}
 		break;
 	case 0xf4:
+		manufacture = "BIWIN";
+		break;
+	case 0xab:
 		manufacture = "BIWIN";
 		break;
 	default:
@@ -1108,26 +1178,196 @@ seccess:
 
 	return ret;
 }
+static uint32_t get_mr_value(unsigned int mr_index) {
+	unsigned int ret_value = 0;
+#if (defined(CONFIG_MTK_PLATFORM) || defined(CONFIG_OPLUS_DEVICE_INFO_MTK_PLATFORM)) /* MTK */
+	int i;
+	if (mr_info != NULL) {
+		for (i = 0; i < DRAMC_MR_CNT; i++) {
+			if(mr_info[i].mr_index == mr_index) {
+				pr_info("mr_info:idx= %d, value, %x \n", mr_info[i].mr_index, mr_info[i].mr_value & 0xFF);
+				ret_value = mr_info[i].mr_value & 0xFF;
+				return ret_value;
+			}
+		}
+	} else {
+		pr_err("MTK mr_info is NULL, get_mr_value falied!\n");
+		return ret_value;
+	}
+#else /* Qcom */
+	char mr_value[DDR_MR_SIZE_COUNT][DDR_INFO_LEN] = {0}; /* {{MR5_Value}, {MR6_Value}, {MR7_Value}, {MR8_Density_Value}, {DDR_Size}} */
+	int i = 0;
+	int j = 0;
+	int k = 0;
+	int split_count = 0;
 
+	/* separate device_info.ddr_info strings as '|' */
+	if (strlen(ddr_vendor_size) != 0) {
+		pr_info("device_info.ddr_info= %s\n", ddr_vendor_size);
+		while(ddr_vendor_size[i] != '\0') {
+			if (ddr_vendor_size[i] == '|') {
+				j++;
+				k = 0;
+				split_count++;
+			} else {
+				mr_value[j][k] = ddr_vendor_size[i];
+				k++;
+			}
+			i++;
+		}
+		if ((split_count == 1) && (strlen(mr_value[1]) != 0)) {
+			pr_info("device_info.ddr_info have no DDR process mr info,\n");
+			memcpy(mr_value[4], mr_value[1], strlen(mr_value[1]));
+			memset(mr_value[1], 0, strlen(mr_value[1]));
+		}
 
+		pr_info("mr_value is = %s %s %s %s %s\n", mr_value[0], mr_value[1], mr_value[2], mr_value[3], mr_value[4]);
+
+		switch (mr_index) {
+		case DDR_MR5:
+			pr_info("get DDR MR5 value is= %s\n", mr_value[0]);
+			sscanf(mr_value[0], "%d", &ret_value);
+			break;
+		case DDR_MR6:
+			pr_info("get DDR MR6 value is= %s\n", mr_value[1]);
+			sscanf(mr_value[1], "%d", &ret_value);
+			break;
+		case DDR_MR7:
+			pr_info("get DDR MR7 value is= %s\n", mr_value[2]);
+			sscanf(mr_value[2], "%d", &ret_value);
+			break;
+		case DDR_MR8_DENSITY:
+			pr_info("get DDR MR8 density value is= %s\n", mr_value[3]);
+			sscanf(mr_value[3], "%d", &ret_value);
+			break;
+		case DDR_SIZE_CASE:
+			pr_info("get DDR Size value is= %s\n", mr_value[4]);
+			sscanf(mr_value[4], "%d", &ret_value);
+			break;
+		default:
+			pr_err("Unknown mr_index %d\n", mr_index);
+		}
+	} else {
+		pr_err("Error in get_mr_value(), device_info.ddr_info is NULL!\n");
+	}
+#endif /* (defined(CONFIG_MTK_PLATFORM) || defined(CONFIG_OPLUS_DEVICE_INFO_MTK_PLATFORM)) */
+
+	return ret_value;
+}
+
+static uint32_t get_process_id(uint32_t vendor_id) {
+	uint32_t process_id = 0;
+	uint32_t mr8_density_value = 0;
+	uint32_t mr7_value = 0;
+
+	switch (vendor_id) {
+	case SAMSUNG_VENDOR_ID:
+		/* Samsung need get MR6|MR8 value */
+		process_id = get_mr_value(DDR_MR6);
+		if (8 == process_id) {
+			/* 8 is 1000, in this case, we need seperate D1z and D1zP from MR8_Density_Value
+			1100 and 1101 means D1z
+			1110 means D1zP */
+			mr8_density_value = get_mr_value(DDR_MR8_DENSITY);
+#if (defined(CONFIG_MTK_PLATFORM) || defined(CONFIG_OPLUS_DEVICE_INFO_MTK_PLATFORM)) /* MTK */
+			process_id |= (mr8_density_value >> 2) & 0xF;
+#else /* Qcom */
+			process_id |= mr8_density_value;
+#endif
+		}
+		break;
+	case CXMT_VENDOR_ID:
+		/* Cxmt need get MR7 value*/
+		process_id = get_mr_value(DDR_MR7);
+		break;
+	case HYNIX_VENDOR_ID:
+		/* Hynix need get MR6|MR7 value */
+		process_id = get_mr_value(DDR_MR6);
+		if (8 == process_id) {
+			/* 8 is 1000, in this case, we need seperate D1a and D1aP from MR7_Value
+			00001000 means D1a
+			10001000 means D1aP */
+			mr7_value = get_mr_value(DDR_MR7);
+			process_id |= mr7_value;
+		}
+		break;
+	case MICRON_VENDOR_ID:
+		/* Micron need get MR6 value */
+		process_id = get_mr_value(DDR_MR6);
+		break;
+	default:
+		pr_err("Error in get_process_id, unknown DDR vendor_id %d\n", vendor_id);
+	}
+
+	return process_id;
+}
+
+static int get_process_name(char *process_name) {
+	const struct vendor_process *vendor_process_tmp = NULL;
+	const struct process_info *process_info_tmp = NULL;
+	uint32_t process_id_tmp = 0;
+	uint32_t vendor_id_tmp = 0;
+	int i;
+
+	/* step 1 get ddr mr5 value */
+	vendor_id_tmp = get_mr_value(DDR_MR5);
+
+	/* step 2 get vendor-process key-value pair array based on the value of mr5 */
+	for (i = 0 ; i < ARRAY_SIZE(vendor_processes); i++) {
+		if (vendor_processes[i].vendor_id == vendor_id_tmp) {
+			vendor_process_tmp = &vendor_processes[i];
+			break;
+		}
+	}
+
+	if(vendor_process_tmp == NULL) {
+		pr_err("can't find vendor_processes key-value pair, mr5_value is %d\n", vendor_id_tmp);
+		return -1;
+	}
+
+	/* step 3 get process_id & process_name key-value pair array */
+	process_info_tmp = vendor_process_tmp->process_info;
+	/* step 4 get ddr mr6/mr7/mr8 value based on the value of mr5 */
+	process_id_tmp = get_process_id(vendor_id_tmp);
+	if (0 == process_id_tmp) {
+		pr_err("get_process_id failed, vendor_id is %d\n", vendor_id_tmp);
+		return -1;
+	}
+
+	/* step 5 get process name */
+	while (process_info_tmp && process_info_tmp->process_id != 0) {
+		pr_info("process id is %d, process_name is %s\n", process_info_tmp->process_id, process_info_tmp->process_name);
+		if (process_info_tmp->process_id == process_id_tmp) {
+			pr_info("get process name is %s\n", process_info_tmp->process_name);
+			strncpy(process_name, process_info_tmp->process_name, DDR_INFO_LEN);
+			return 0;
+		}
+		process_info_tmp++;
+	}
+
+	/* Unknown process id */
+	pr_err("Unknown process id %d\n", process_id_tmp);
+	snprintf(process_name, INFO_LEN, "%s%d", "Unknown", process_id_tmp);
+	return 0;
+}
 #if (defined(CONFIG_MTK_PLATFORM) || defined(CONFIG_OPLUS_DEVICE_INFO_MTK_PLATFORM))
-#define DRAMC_MAX_RK 2
-#define DRAMC_MR_CNT 4
-#define DRAMC_SIZE_UNIT 128/1024
 static int __attribute__((__unused__)) init_ddr_vendor_size(struct device_info *dev_info)
 {
 	uint32_t ddr_type = DRAMC_TOP_TYPE_LPDDR5;
-	unsigned int rk_size[DRAMC_MAX_RK];
-	char ddr_manufacture[64];
+	unsigned int rk_size[DRAMC_MAX_RK] = {0};
+	char ddr_manufacture[DDR_INFO_LEN] = {0};
 	struct manufacture_info *info = NULL;
 	int ret = 0;
 	int i;
-	struct mr_info_t *mr_info = NULL;
-	uint32_t ddr_vendor;
+	uint32_t ddr_vendor_id;
 	struct device_node *mem_node;
+	const struct vendor_process *vendor_info = NULL;
+	const char *vendor_name = NULL;
+	char process_name[DDR_INFO_LEN] = {0};
 
 	info = (struct manufacture_info *) kzalloc(sizeof(*info), GFP_KERNEL);
 	if (!info) {
+		pr_err("kzalloc info failed\n");
 		return -ENOMEM;
 	}
 
@@ -1137,34 +1377,37 @@ static int __attribute__((__unused__)) init_ddr_vendor_size(struct device_info *
 		mem_node = of_find_node_by_path("/soc/dramc@10230000");
 		if (!mem_node) {
 			pr_err("/soc/dramc@10230000 node not found \n");
+			kfree(info);
 			return -ENOENT;
 		}
 	}
 
-	mr_info = (struct mr_info_t *)kzalloc(sizeof(struct mr_info_t) * DRAMC_MR_CNT, GFP_KERNEL);
-	ret = of_property_read_u32_array(mem_node, "mr", (unsigned int *)mr_info, (sizeof(struct mr_info_t) * DRAMC_MR_CNT) >> 2);
-	if (ret < 0) {
-		pr_err("mr read error \n");
-		return -ENOENT;
-	}
+	if (mr_info == NULL) {
+		mr_info = (struct mr_info_t *)kzalloc(sizeof(struct mr_info_t) * DRAMC_MR_CNT, GFP_KERNEL);
+		if (!mr_info) {
+			pr_err("kzalloc mr_info failed\n");
+			kfree(info);
+			return -ENOMEM;
+		}
 
-	for (i=0; i < DRAMC_MR_CNT; i++) {
-		pr_err("mr_info:idx= %d, value, %x \n", mr_info[i].mr_index, mr_info[i].mr_value);
-		if(mr_info[i].mr_index == 5) {
-			ddr_vendor = mr_info[i].mr_value;
+		ret = of_property_read_u32_array(mem_node, "mr", (unsigned int *)mr_info, (sizeof(struct mr_info_t) * DRAMC_MR_CNT) >> 2);
+		if (ret < 0) {
+			pr_err("mr read error \n");
+			goto out;
 		}
 	}
 
+	ddr_vendor_id = get_mr_value(DDR_MR5);
 	ret = of_property_read_u32_array(mem_node, "rk_size", rk_size, 2);
 	if (ret < 0) {
 		pr_err("rk_size read error \n");
-		return -ENOENT;
+		goto out;
 	}
 
 	ret = of_property_read_u32(mem_node, "dram_type", &ddr_type);
 	if (ret < 0) {
 		pr_err("dram_type read error \n");
-		return -ENOENT;
+		goto out;
 	}
 
 	if (ddr_type == DRAMC_TOP_TYPE_LPDDR5 || ddr_type == DRAMC_TOP_TYPE_LPDDR5X) {
@@ -1175,34 +1418,34 @@ static int __attribute__((__unused__)) init_ddr_vendor_size(struct device_info *
 		info->version = "unknown";
 	}
 
-	sprintf(ddr_manufacture, "%d", ddr_vendor);
-	if (strcmp(ddr_manufacture, "1") == 0) {
-		memset(ddr_manufacture, 0, sizeof(ddr_manufacture));
-		strcpy(ddr_manufacture, "Samsung");
-	} else if (strcmp(ddr_manufacture, "6") == 0) {
-		memset(ddr_manufacture, 0, sizeof(ddr_manufacture));
-		strcpy(ddr_manufacture, "Hynix");
-	} else if (strcmp(ddr_manufacture, "19") == 0) {
-		memset(ddr_manufacture, 0, sizeof(ddr_manufacture));
-		strcpy(ddr_manufacture, "Cxmt");
-	} else if (strcmp(ddr_manufacture, "255") == 0) {
-		memset(ddr_manufacture, 0, sizeof(ddr_manufacture));
-		strcpy(ddr_manufacture, "Micron");
-	} else {
-		memset(ddr_manufacture, 0, sizeof(ddr_manufacture));
-		strcpy(ddr_manufacture, "Unknown|");
+	for (i = 0; i < ARRAY_SIZE(vendor_processes); i++) {
+		if (vendor_processes[i].vendor_id == ddr_vendor_id) {
+			vendor_info = &vendor_processes[i];
+			break;
+		}
 	}
+
+	vendor_name = vendor_info ? vendor_info->vendor_name : "Unknown";
+	get_process_name(process_name);
 
 	info->manufacture = (char *) kzalloc(32, GFP_KERNEL);
 	if (!info->manufacture) {
-		kfree(info);
-		return -ENOMEM;
+		goto out;
 	}
 
-	sprintf(ddr_manufacture, "%s|%dG", ddr_manufacture, (rk_size[0] +  rk_size[1]) * DRAMC_SIZE_UNIT);
+	snprintf(ddr_manufacture, sizeof(ddr_manufacture), "%s|%s|%dG", vendor_name, process_name, (rk_size[0] +  rk_size[1]) * DRAMC_SIZE_UNIT);
+
 	memcpy(info->manufacture, ddr_manufacture, strlen(ddr_manufacture) > 31?31:strlen(ddr_manufacture));
 	pr_err("device_info.vendor_size= %s\n", ddr_manufacture);
+	kfree(mr_info);
+	mr_info = NULL;
 	return register_devinfo("ddr", info);
+
+out:
+	kfree(info);
+	kfree(mr_info);
+	mr_info = NULL;
+	return -ENOMEM;
 }
 #endif
 
@@ -1234,9 +1477,12 @@ static int __attribute__((__unused__)) init_ddr_vendor_size(struct device_info *
 {
 	uint32_t ddr_type = DDR_TYPE_LPDDR5;
 	struct manufacture_info *info = NULL;
-	char ddr_manufacture[64];
-	char ddr_size[64];
-	int i, j;
+	char ddr_manufacture[DDR_INFO_LEN];
+	char ddr_size[DDR_INFO_LEN];
+
+	char process_name[DDR_INFO_LEN] = {0};
+	uint32_t mr5_value = 0;
+	uint32_t ddr_size_int = 0;
 
 	info = (struct manufacture_info *) kzalloc(sizeof(*info), GFP_KERNEL);
 	if (!info) {
@@ -1253,16 +1499,13 @@ static int __attribute__((__unused__)) init_ddr_vendor_size(struct device_info *
 		info->version = "unknown";
 	}
 
-	if (strlen(ddr_vendor_size) != 0) {
-		for (i=0; ddr_vendor_size[i] != '|'; i++) {
-			ddr_manufacture[i] = ddr_vendor_size[i];
-		}
+	mr5_value = get_mr_value(DDR_MR5);
+	sprintf(ddr_manufacture, "%d", mr5_value);
 
-		i++;
-		for(j=0; ddr_vendor_size[i] != '\0'; j++) {
-			ddr_size[j] = ddr_vendor_size[i];
-			i++;
-		}
+	ddr_size_int = get_mr_value(DDR_SIZE_CASE);
+	sprintf(ddr_size, "%d", ddr_size_int);
+
+	get_process_name(process_name);
 
 	if (strcmp(ddr_manufacture, "1") == 0) {
 			memset(ddr_manufacture, 0, sizeof(ddr_manufacture));
@@ -1281,16 +1524,16 @@ static int __attribute__((__unused__)) init_ddr_vendor_size(struct device_info *
 			strcpy(ddr_manufacture, "Unknown|");
 		}
 
-		info->manufacture = (char *) kzalloc(32, GFP_KERNEL);
-		if (!info->manufacture) {
-			kfree(info);
-			return -ENOMEM;
-		}
-
-		sprintf(ddr_manufacture, "%s|%sG", ddr_manufacture, ddr_size);
-		memcpy(info->manufacture, ddr_manufacture, strlen(ddr_manufacture) > 31?31:strlen(ddr_manufacture));
-		pr_err("device_info.vendor_size= %s\n", ddr_manufacture);
+	info->manufacture = (char *) kzalloc(32, GFP_KERNEL);
+	if (!info->manufacture) {
+		kfree(info);
+		return -ENOMEM;
 	}
+
+	sprintf(ddr_manufacture, "%s|%s|%sG", ddr_manufacture, process_name, ddr_size);
+	memcpy(info->manufacture, ddr_manufacture, strlen(ddr_manufacture) > 31?31:strlen(ddr_manufacture));
+	pr_err("device_info.vendor_size= %s\n", ddr_manufacture);
+
 
 	return register_devinfo("ddr", info);
 }
