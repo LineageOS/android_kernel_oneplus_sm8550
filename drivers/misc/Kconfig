@@ -580,4 +580,5 @@ source "drivers/misc/qrc/Kconfig"
 source "drivers/misc/tri_state_key/Kconfig"
 source "drivers/misc/aw8697_haptic/Kconfig"
 source "drivers/misc/oplus_secure/Kconfig"
+source "drivers/misc/oplus_consumer_ir/Kconfig"
 endmenu
