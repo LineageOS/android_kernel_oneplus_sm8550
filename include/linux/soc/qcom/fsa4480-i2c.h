@@ -56,7 +56,6 @@ static inline int fsa4480_unreg_notifier(struct notifier_block *nb,
 {
 	return 0;
 }
-
 #ifdef OPLUS_ARCH_EXTENDS
 /* Add DIO4480 support */
 static inline int fsa4480_get_chip_vendor(struct device_node *node)
