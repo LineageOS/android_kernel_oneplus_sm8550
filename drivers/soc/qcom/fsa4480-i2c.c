@@ -1,23 +1,27 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/power_supply.h>
 #include <linux/regmap.h>
 #include <linux/i2c.h>
 #include <linux/mutex.h>
 #include <linux/usb/typec.h>
 #include <linux/usb/ucsi_glink.h>
 #include <linux/soc/qcom/fsa4480-i2c.h>
+#include <linux/iio/consumer.h>
 #include <linux/qti-regmap-debugfs.h>
 
 #ifdef OPLUS_ARCH_EXTENDS
 /* Add for fsa4480 headset detection interrupt */
 #include <linux/of_gpio.h>
 #include <linux/gpio.h>
-
+/*add WAS4783 support*/
+#include "../../power/oplus/v2/include/oplus_audio_switch.h"
 /* Add for 3rd protocal stack notifier */
 #if IS_ENABLED(CONFIG_TCPC_CLASS)
 #include <tcpci.h>
@@ -37,6 +41,8 @@
 /* Add DIO4480 support */
 #define HL5280_DEVICE_REG_VALUE 0x49
 #define DIO4480_DEVICE_REG_VALUE 0xF1
+/*add WAS4783 support*/
+#define WAS4783_DEVICE_REG_VALUE 0x31
 #define INVALID_DEVICE_REG_VALUE 0x00
 
 #define FSA4480_DEVICE_ID       0x00
@@ -83,7 +89,8 @@
 enum switch_vendor {
     FSA4480 = 0,
     HL5280,
-    DIO4480
+    DIO4480,
+    WAS4783
 };
 
 /* Add for 3rd protocal stack notifier */
@@ -94,10 +101,40 @@ static int probe_retry = 0;
 static int chipid_read_retry = 0;
 #endif /* OPLUS_ARCH_EXTENDS */
 
+#ifdef OPLUS_ARCH_EXTENDS
+/*add WAS4783 support*/
+#define GET_BIT(x, bit)                  ((x & (1 << bit)) >> bit)  /* Get bit x */
+#define GET_BITS(_var, _index, _width)   (((_var) >> (_index)) & ((0x1 << (_width)) - 1))
+#define CLEAR_BIT(x, bit)                (x &= ~(1 << bit))  /* Reset bit x */
+#define SET_BIT(x, bit)                  (x |= (1 << bit))   /* Set bit x */
+
+enum TYPEC_AUDIO_SWITCH_STATE {
+	TYPEC_AUDIO_SWITCH_STATE_DPDM          = 0x0,
+	TYPEC_AUDIO_SWITCH_STATE_FAST_CHG      = 0x1,
+	TYPEC_AUDIO_SWITCH_STATE_AUDIO         = 0x1 << 1,
+	TYPEC_AUDIO_SWITCH_STATE_UNKNOW        = 0x1 << 2,
+	TYPEC_AUDIO_SWITCH_STATE_SUPPORT       = 0x1 << 4,
+	TYPEC_AUDIO_SWITCH_STATE_NO_RAM,
+	TYPEC_AUDIO_SWITCH_STATE_I2C_ERR       = 0x1 << 8,
+	TYPEC_AUDIO_SWITCH_STATE_INVALID_PARAM = 0x1 << 9,
+};
+
+enum DNDP_STATE {
+	DNL_OPEN_OR_DPR_OPEN      = 0x0, /* DN_L switch is open, or DN_R switch is open */
+	DNL_DN_OR_DPR_DP          = 0x1, /* DN_L switch is connected to DN, or DN_R switch is connected to DP */
+	DNL_L_OR_DPR_R            = 0x2, /* DN_L switch is connected to L, or DP_R switch is connected to R */
+	DNL_DN2_OR_DPR_DP2        = 0x3, /* DN_L switch is connected to DN2, or DP_R switch is connected to DP2 */
+};
+/* SWITCH STATUS 0 */
+#define DEFAULT_SWITCH_STATUS0_DP_R_SWITCH_STATUS_L    (2)
+#define DEFAULT_SWITCH_STATUS0_DN_L_SWITCH_STATUS_L    (0)
+#endif /* OPLUS_ARCH_EXTENDS */
 struct fsa4480_priv {
 	struct regmap *regmap;
 	struct device *dev;
-	struct notifier_block ucsi_nb;
+	struct power_supply *usb_psy;
+	struct notifier_block nb;
+	struct iio_channel *iio_ch;
 	atomic_t usbc_mode;
 	struct work_struct usbc_analog_work;
 	struct blocking_notifier_head fsa4480_notifier;
@@ -112,7 +149,15 @@ struct fsa4480_priv {
 	enum switch_vendor vendor;
 	/* Add for 3rd usb protocal support */
 	unsigned int usb_protocal;
+	/*add WAS4783 support*/
+	struct notifier_block chg_nb;
+	struct mutex noti_lock;
+	/*add for 3rd protocal stack notifer*/
+	#if IS_ENABLED(CONFIG_TCPC_CLASS)
+	struct tcpc_device *tcpc;
 	#endif
+	#endif
+	u32 use_powersupply;
 };
 
 struct fsa4480_reg_val {
@@ -205,11 +250,28 @@ static void fsa4480_usbc_update_settings(struct fsa4480_priv *fsa_priv,
 #endif /* OPLUS_ARCH_EXTENDS */
 }
 
-static int fsa4480_usbc_event_changed(struct notifier_block *nb,
+static int fsa4480_usbc_event_changed_psupply(struct fsa4480_priv *fsa_priv,
 				      unsigned long evt, void *ptr)
 {
-	struct fsa4480_priv *fsa_priv =
-			container_of(nb, struct fsa4480_priv, ucsi_nb);
+	struct device *dev = NULL;
+
+	if (!fsa_priv)
+		return -EINVAL;
+
+	dev = fsa_priv->dev;
+	if (!dev)
+		return -EINVAL;
+	dev_dbg(dev, "%s: queueing usbc_analog_work\n",
+		__func__);
+	pm_stay_awake(fsa_priv->dev);
+	queue_work(system_freezable_wq, &fsa_priv->usbc_analog_work);
+
+	return 0;
+}
+
+static int fsa4480_usbc_event_changed_ucsi(struct fsa4480_priv *fsa_priv,
+				      unsigned long evt, void *ptr)
+{
 	struct device *dev;
 	#ifndef OPLUS_ARCH_EXTENDS
 	/* Add for 3rd protocal stack notifier*/
@@ -245,11 +307,11 @@ static int fsa4480_usbc_event_changed(struct notifier_block *nb,
 	#else /* OPLUS_ARCH_EXTENDS */
 	if (fsa_priv->usb_protocal == 1) {
 #if IS_ENABLED(CONFIG_TCPC_CLASS)
-		dev_err(dev, "%s: USB change event received, new_state:%d, old_state:%d\n",
+		dev_info(dev, "%s: USB change event received, new_state:%d, old_state:%d\n",
 				__func__, noti->typec_state.new_state, noti->typec_state.old_state);
 #endif
 	} else {
-		dev_err(dev, "%s: USB change event received, supply mode %d, usbc mode %ld, expected %d\n",
+		dev_info(dev, "%s: USB change event received, supply mode %d, usbc mode %ld, expected %d\n",
 				__func__, acc, fsa_priv->usbc_mode.counter, TYPEC_ACCESSORY_AUDIO);
 	}
 	#endif /* OPLUS_ARCH_EXTENDS */
@@ -264,12 +326,12 @@ static int fsa4480_usbc_event_changed(struct notifier_block *nb,
 			new_state = noti->typec_state.new_state;
 			if (old_state == TYPEC_UNATTACHED &&
 			    new_state == TYPEC_ATTACHED_AUDIO) {
-				dev_err(dev, "Audio plug in\n");
+				dev_info(dev, "Audio plug in\n");
 				/* enable AudioAccessory connection */
 				acc = TYPEC_ACCESSORY_AUDIO;
 			} else if (old_state == TYPEC_ATTACHED_AUDIO &&
 				   new_state == TYPEC_UNATTACHED) {
-				dev_err(dev, "Audio plug out\n");
+				dev_info(dev, "Audio plug out\n");
 				/* disable AudioAccessory connection */
 				acc = TYPEC_ACCESSORY_NONE;
 			}
@@ -300,7 +362,85 @@ static int fsa4480_usbc_event_changed(struct notifier_block *nb,
 	return 0;
 }
 
-static int fsa4480_usbc_analog_setup_switches(struct fsa4480_priv *fsa_priv)
+static int fsa4480_usbc_event_changed(struct notifier_block *nb_ptr,
+				      unsigned long evt, void *ptr)
+{
+	struct fsa4480_priv *fsa_priv =
+			container_of(nb_ptr, struct fsa4480_priv, nb);
+	struct device *dev;
+
+	if (!fsa_priv)
+		return -EINVAL;
+
+	dev = fsa_priv->dev;
+	if (!dev)
+		return -EINVAL;
+
+	if (fsa_priv->use_powersupply)
+		return fsa4480_usbc_event_changed_psupply(fsa_priv, evt, ptr);
+	else
+		return fsa4480_usbc_event_changed_ucsi(fsa_priv, evt, ptr);
+}
+
+static int fsa4480_usbc_analog_setup_switches_psupply(
+						struct fsa4480_priv *fsa_priv)
+{
+	int rc = 0;
+	union power_supply_propval mode;
+	struct device *dev;
+
+	if (!fsa_priv)
+		return -EINVAL;
+	dev = fsa_priv->dev;
+	if (!dev)
+		return -EINVAL;
+
+	rc = iio_read_channel_processed(fsa_priv->iio_ch, &mode.intval);
+
+	mutex_lock(&fsa_priv->notification_lock);
+	/* get latest mode again within locked context */
+	if (rc < 0) {
+		dev_err(dev, "%s: Unable to read USB TYPEC_MODE: %d\n",
+			__func__, rc);
+		goto done;
+	}
+
+	dev_dbg(dev, "%s: setting GPIOs active = %d rcvd intval 0x%X\n",
+		__func__, mode.intval != TYPEC_ACCESSORY_NONE, mode.intval);
+	if (atomic_read(&(fsa_priv->usbc_mode)) == mode.intval)
+		goto done; /* filter notifications received before */
+	atomic_set(&(fsa_priv->usbc_mode), mode.intval);
+
+	switch (mode.intval) {
+	/* add all modes FSA should notify for in here */
+	case TYPEC_ACCESSORY_AUDIO:
+		/* activate switches */
+		fsa4480_usbc_update_settings(fsa_priv, 0x00, 0x9F);
+
+		/* notify call chain on event */
+		blocking_notifier_call_chain(&fsa_priv->fsa4480_notifier,
+		mode.intval, NULL);
+		break;
+	case TYPEC_ACCESSORY_NONE:
+		/* notify call chain on event */
+		blocking_notifier_call_chain(&fsa_priv->fsa4480_notifier,
+				TYPEC_ACCESSORY_NONE, NULL);
+
+		/* deactivate switches */
+		fsa4480_usbc_update_settings(fsa_priv, 0x18, 0x98);
+		break;
+	default:
+		/* ignore other usb connection modes */
+		break;
+	}
+
+done:
+	mutex_unlock(&fsa_priv->notification_lock);
+	return rc;
+}
+
+static int fsa4480_usbc_analog_setup_switches_ucsi(
+						struct fsa4480_priv *fsa_priv)
 {
 	int rc = 0;
 	int mode;
@@ -398,6 +538,171 @@ static int fsa4480_usbc_analog_setup_switches(struct fsa4480_priv *fsa_priv)
 }
 
 #ifdef OPLUS_ARCH_EXTENDS
+static int typec_switch_to_fast_charger(struct fsa4480_priv *fsa_priv, unsigned long to_fast_charger)
+{
+	struct device *dev;
+	int ret = 0;
+	unsigned int reg_val = 0, dn_l_status = 0, dp_r_status = 0, width = 2;
+
+	if (!fsa_priv) {
+		pr_err("%s, fsa_priv is NULL", __func__);
+		return -EINVAL;
+	}
+
+	dev = fsa_priv->dev;
+	if (!dev) {
+		pr_err("%s, fsa_priv->dev is NULL", __func__);
+		return -EINVAL;
+	}
+
+	if (fsa_priv->vendor != WAS4783) {
+		dev_err(dev, "%s, current chip 0x%02x, is not supported!", __func__, fsa_priv->vendor);
+		return -EINVAL;
+	}
+
+	mutex_lock(&fsa_priv->noti_lock);
+	regmap_read(fsa_priv->regmap, FSA4480_SWITCH_STATUS0, &reg_val);
+	dn_l_status = GET_BITS(reg_val, DEFAULT_SWITCH_STATUS0_DN_L_SWITCH_STATUS_L, width);
+	dp_r_status = GET_BITS(reg_val, DEFAULT_SWITCH_STATUS0_DP_R_SWITCH_STATUS_L, width);
+	if (dn_l_status == 0x02 || dp_r_status == 0x02) {
+		dev_info(dev,"%s, switching from headphone to charger is prohibited!\n", __func__);
+		mutex_unlock(&fsa_priv->noti_lock);
+		return -EPERM;
+	}
+
+	dev_info(dev, "%s: to_fast_charger = %ld\n", __func__, to_fast_charger);
+	if (to_fast_charger) {
+		regmap_write(fsa_priv->regmap, FSA4480_SWITCH_CONTROL, 0x80);
+		regmap_write(fsa_priv->regmap, FSA4480_SWITCH_SETTINGS, 0x98);
+		usleep_range(10000, 10005);
+		dev_info(dev, "%s, charger plugin. set to switch mode", __func__);
+	} else {
+		regmap_write(fsa_priv->regmap, FSA4480_SWITCH_CONTROL, 0x18);
+		regmap_write(fsa_priv->regmap, FSA4480_SWITCH_SETTINGS, 0x98);
+		dev_info(dev, "%s, charger plugout. set to usb mode", __func__);
+	}
+
+	mutex_unlock(&fsa_priv->noti_lock);
+	return ret;
+}
+
+/*add WAS4783 support*/
+/* bit3~0:
+* 0000 DPDM, 0001 fast charge, 0010 Headphone 0100 unknown
+*
+* bit7~4:
+* 0000 not support 1to3 switch
+* 0001 support 1to3 switch
+
+* bit11~bit8:
+* 0000 noram
+* 0001 iic err
+* 0010 invalid param */
+static int typec_switch_get_status(struct fsa4480_priv *fsa_priv)
+{
+	struct device *dev = NULL;
+	int rc = 0;
+	unsigned int reg_status = 0, reg_val = 0, reg_l_shift = 0, reg_r_shift = 0;
+	unsigned int width = 2, dn_l_status = 0, dp_r_status = 0;
+
+	if (!fsa_priv) {
+		pr_err("%s, fsa_priv is NULL", __func__);
+		rc |= TYPEC_AUDIO_SWITCH_STATE_INVALID_PARAM;
+		goto err_handler;
+	}
+
+	dev = fsa_priv->dev;
+	if (!dev) {
+		pr_err("%s, fsa_priv->dev is NULL", __func__);
+		rc |= TYPEC_AUDIO_SWITCH_STATE_INVALID_PARAM;
+		goto err_handler;
+	}
+
+	mutex_lock(&fsa_priv->noti_lock);
+	if (fsa_priv->vendor == WAS4783) {
+		rc |= TYPEC_AUDIO_SWITCH_STATE_SUPPORT;
+	}
+
+	reg_status = FSA4480_SWITCH_STATUS0;
+	reg_l_shift = DEFAULT_SWITCH_STATUS0_DN_L_SWITCH_STATUS_L;
+	reg_r_shift = DEFAULT_SWITCH_STATUS0_DP_R_SWITCH_STATUS_L;
+
+	regmap_read(fsa_priv->regmap, reg_status, &reg_val);
+	dev_info(dev, "%s, reg[0x%02x] = 0x%02x", __func__, reg_status, reg_val);
+	dn_l_status = GET_BITS(reg_val, reg_l_shift, width);
+	dp_r_status = GET_BITS(reg_val, reg_r_shift, width);
+
+	dev_info(dev, "%s, dn_l_status = 0x%02x, dp_r_status = 0x%02x", __func__, dn_l_status, dp_r_status);
+	switch (dn_l_status) {
+	case DNL_OPEN_OR_DPR_OPEN:
+		dev_info(dev, "%s, DN_L Switch Open/Not Connected", __func__);
+		break;
+	case DNL_DN_OR_DPR_DP:
+		dev_info(dev, "%s, DN_L connected to DN1", __func__);
+		break;
+	case DNL_L_OR_DPR_R: // Headphone
+		dev_info(dev, "%s, DN_L connected to L", __func__);
+		break;
+	case DNL_DN2_OR_DPR_DP2: // Fast Charger
+		dev_info(dev, "%s, DN_L connected to DN2", __func__);
+		break;
+	default:
+		break;
+	}
+
+	switch (dp_r_status) {
+	case DNL_OPEN_OR_DPR_OPEN:
+		dev_info(dev, "%s, DP_R Switch Open/Not Connected", __func__);
+		break;
+	case DNL_DN_OR_DPR_DP:
+		dev_info(dev, "%s, DP_R connected to DP1", __func__);
+		break;
+	case DNL_L_OR_DPR_R: // Headphone
+		dev_info(dev, "%s, DP_R connected to R", __func__);
+		break;
+	case DNL_DN2_OR_DPR_DP2: // Fast Charger
+		dev_info(dev, "%s, DP_R connected to DP2", __func__);
+		break;
+	default:
+		break;
+	}
+
+	if ((dn_l_status == DNL_DN_OR_DPR_DP) && (dp_r_status == DNL_DN_OR_DPR_DP)) { // Charger
+		rc |= TYPEC_AUDIO_SWITCH_STATE_DPDM;
+	} else if ((dn_l_status == DNL_DN2_OR_DPR_DP2) && (dp_r_status == DNL_DN2_OR_DPR_DP2)) { // Fast Charger
+		rc |= TYPEC_AUDIO_SWITCH_STATE_FAST_CHG;
+	} else if ((dn_l_status == DNL_L_OR_DPR_R) && (dp_r_status == DNL_L_OR_DPR_R)) { // Headphone
+		rc |= TYPEC_AUDIO_SWITCH_STATE_AUDIO;
+	} else { // Unknown
+		rc |= TYPEC_AUDIO_SWITCH_STATE_UNKNOW;
+		pr_err("%s, Typec audio switch state is unknow", __func__);
+	}
+	mutex_unlock(&fsa_priv->noti_lock);
+
+err_handler:
+	return rc;
+}
+
+static int typec_switch_chg_event_changed(struct notifier_block *nb, unsigned long event, void *ptr)
+{
+	struct fsa4480_priv *fsa_priv =
+				container_of(nb, struct fsa4480_priv, chg_nb);
+	switch (event) {
+	case TYPEC_AUDIO_SWITCH_STATE_DPDM:
+	case TYPEC_AUDIO_SWITCH_STATE_FAST_CHG:
+		typec_switch_to_fast_charger(fsa_priv, event);
+		break;
+	case TYPEC_AUDIO_SWITCH_STATE_AUDIO:
+		return typec_switch_get_status(fsa_priv);
+	default:
+		break;
+	}
+
+	return NOTIFY_OK;
+}
+#endif /* OPLUS_ARCH_EXTENDS */
+
+#ifdef OPLUS_ARCH_EXTENDS
 /* Add for dynamic check cross */
 int fsa4480_check_cross_conn(struct device_node *node)
 {
@@ -422,6 +727,7 @@ int fsa4480_check_cross_conn(struct device_node *node)
 	switch (fsa_priv->vendor) {
 	case FSA4480:
 	case HL5280:
+	case WAS4783:
 	    ret = 0;
 	    break;
 	case DIO4480:
@@ -435,6 +741,14 @@ int fsa4480_check_cross_conn(struct device_node *node)
 }
 EXPORT_SYMBOL(fsa4480_check_cross_conn);
 #endif /* OPLUS_ARCH_EXTENDS */
+
+static int fsa4480_usbc_analog_setup_switches(struct fsa4480_priv *fsa_priv)
+{
+	if (fsa_priv->use_powersupply)
+		return fsa4480_usbc_analog_setup_switches_psupply(fsa_priv);
+	else
+		return fsa4480_usbc_analog_setup_switches_ucsi(fsa_priv);
+}
 
 /*
  * fsa4480_reg_notifier - register notifier block with fsa driver
@@ -491,8 +805,11 @@ EXPORT_SYMBOL(fsa4480_reg_notifier);
 int fsa4480_unreg_notifier(struct notifier_block *nb,
 			     struct device_node *node)
 {
+	int rc = 0;
 	struct i2c_client *client = of_find_i2c_device_by_node(node);
 	struct fsa4480_priv *fsa_priv;
+	struct device *dev;
+	union power_supply_propval mode;
 
 	if (!client)
 		return -EINVAL;
@@ -500,10 +817,34 @@ int fsa4480_unreg_notifier(struct notifier_block *nb,
 	fsa_priv = (struct fsa4480_priv *)i2c_get_clientdata(client);
 	if (!fsa_priv)
 		return -EINVAL;
+	if (fsa_priv->use_powersupply) {
+		dev = fsa_priv->dev;
+		if (!dev)
+			return -EINVAL;
 
-	fsa4480_usbc_update_settings(fsa_priv, 0x18, 0x98);
-	return blocking_notifier_chain_unregister
+		mutex_lock(&fsa_priv->notification_lock);
+		/* get latest mode within locked context */
+
+		rc = iio_read_channel_processed(fsa_priv->iio_ch, &mode.intval);
+
+		if (rc < 0) {
+			dev_dbg(dev, "%s: Unable to read USB TYPEC_MODE: %d\n",
+				__func__, rc);
+			mutex_unlock(&fsa_priv->notification_lock);
+			return rc;
+		}
+		/* Do not reset switch settings for usb digital hs */
+		if (mode.intval == TYPEC_ACCESSORY_AUDIO)
+			fsa4480_usbc_update_settings(fsa_priv, 0x18, 0x98);
+		rc = blocking_notifier_chain_unregister
 					(&fsa_priv->fsa4480_notifier, nb);
+		mutex_unlock(&fsa_priv->notification_lock);
+	} else {
+		fsa4480_usbc_update_settings(fsa_priv, 0x18, 0x98);
+		rc = blocking_notifier_chain_unregister
+				(&fsa_priv->fsa4480_notifier, nb);
+	}
+	return rc;
 }
 EXPORT_SYMBOL(fsa4480_unreg_notifier);
 
@@ -579,6 +920,7 @@ int fsa4480_switch_event(struct device_node *node,
 
 		regmap_read(fsa_priv->regmap, FSA4480_SWITCH_CONTROL,
 				&switch_control);
+		pr_info("%s: reg[0x%x]=0x%x\n", __func__, FSA4480_SWITCH_CONTROL, switch_control);
 		if ((switch_control & 0x07) == 0x07)
 			switch_control = 0x0;
 		else
@@ -618,7 +960,9 @@ static int fsa4480_parse_dt(struct fsa4480_priv *fsa_priv,
 	struct device *dev)
 {
 	struct device_node *dNode = dev->of_node;
+	const char *usb_protocal_name = "fsa4480,use-3rd-usb-protocal";
 	int ret = 0;
+	int rc = 0;
 
 	if (dNode == NULL)
 		return -ENODEV;
@@ -641,6 +985,12 @@ static int fsa4480_parse_dt(struct fsa4480_priv *fsa_priv,
 	}
 
 	gpio_direction_output(fsa_priv->hs_det_pin, 1);
+
+	rc = of_property_read_u32(dNode, usb_protocal_name, &fsa_priv->usb_protocal);
+	if (rc) {
+		pr_info("%s: %s in dt node is missing\n", __func__, usb_protocal_name);
+		fsa_priv->usb_protocal = 0;
+	}
 
 	return ret;
 }
@@ -672,14 +1022,11 @@ static int fsa4480_probe(struct i2c_client *i2c,
 			 const struct i2c_device_id *id)
 {
 	struct fsa4480_priv *fsa_priv;
+	u32 use_powersupply = 0;
 	int rc = 0;
 	#ifdef OPLUS_ARCH_EXTENDS
 	/* Add DIO4480 support */
 	unsigned int reg_value = 0;
-	/* Add for 3rd protocal stack notifer */
-#if IS_ENABLED(CONFIG_TCPC_CLASS)
-	struct tcpc_device *tcpc;
-#endif
 	#endif /* OPLUS_ARCH_EXTENDS */
 
 	#ifdef OPLUS_ARCH_EXTENDS
@@ -692,6 +1039,7 @@ static int fsa4480_probe(struct i2c_client *i2c,
 	if (!fsa_priv)
 		return -ENOMEM;
 
+	memset(fsa_priv, 0, sizeof(struct fsa4480_priv));
 	fsa_priv->dev = &i2c->dev;
 
 	#ifdef OPLUS_ARCH_EXTENDS
@@ -712,7 +1060,7 @@ static int fsa4480_probe(struct i2c_client *i2c,
 	}
 
 	#ifdef OPLUS_ARCH_EXTENDS
-	/* Add DIO4480 support */
+	/*add DIO4480/WAS4783 support*/
 	regmap_read(fsa_priv->regmap, FSA4480_DEVICE_ID, &reg_value);
 	dev_info(fsa_priv->dev, "%s: device id reg value: 0x%x\n", __func__, reg_value);
 	if (reg_value == HL5280_DEVICE_REG_VALUE) {
@@ -721,6 +1069,9 @@ static int fsa4480_probe(struct i2c_client *i2c,
 	} else if (reg_value == DIO4480_DEVICE_REG_VALUE) {
 		dev_info(fsa_priv->dev, "%s: switch chip is DIO4480\n", __func__);
 		fsa_priv->vendor = DIO4480;
+	} else if (reg_value == WAS4783_DEVICE_REG_VALUE) {
+		dev_info(fsa_priv->dev, "%s: switch chip is WAS4783\n", __func__);
+		fsa_priv->vendor = WAS4783;
 	} else if (reg_value == INVALID_DEVICE_REG_VALUE && chipid_read_retry < 5) {
 		dev_info(fsa_priv->dev, "%s: incorrect chip ID [0x%x]\n", __func__, reg_value);
 		chipid_read_retry++;
@@ -744,55 +1095,121 @@ static int fsa4480_probe(struct i2c_client *i2c,
 	devm_regmap_qti_debugfs_register(fsa_priv->dev, fsa_priv->regmap);
 	#endif /* OPLUS_ARCH_EXTENDS */
 
-	fsa_priv->ucsi_nb.notifier_call = fsa4480_usbc_event_changed;
-	fsa_priv->ucsi_nb.priority = 0;
-	#ifndef OPLUS_ARCH_EXTENDS
-	/* Add for 3rd protocal stack notifier */
-	rc = register_ucsi_glink_notifier(&fsa_priv->ucsi_nb);
-	if (rc) {
-		dev_err(fsa_priv->dev, "%s: ucsi glink notifier registration failed: %d\n",
-			__func__, rc);
-		goto err_data;
-	}
-	#else /* OPLUS_ARCH_EXTENDS */
-	if (fsa_priv->usb_protocal != 1) {
-		rc = register_ucsi_glink_notifier(&fsa_priv->ucsi_nb);
+	fsa_priv->nb.notifier_call = fsa4480_usbc_event_changed;
+	fsa_priv->nb.priority = 0;
+	rc = of_property_read_u32(fsa_priv->dev->of_node,
+			"qcom,use-power-supply", &use_powersupply);
+	if (rc || use_powersupply == 0) {
+		dev_dbg(fsa_priv->dev,
+			"%s: Looking up %s property failed or disabled\n",
+			__func__, "qcom,use-power-supply");
+
+		fsa_priv->use_powersupply = 0;
+#ifndef OPLUS_ARCH_EXTENDS
+		/* Add for 3rd protocal stack notifier */
+		rc = register_ucsi_glink_notifier(&fsa_priv->nb);
 		if (rc) {
-			dev_err(fsa_priv->dev, "%s: ucsi glink notifier registration failed: %d\n",
-				__func__, rc);
+			dev_err(fsa_priv->dev,
+			  "%s: ucsi glink notifier registration failed: %d\n",
+			  __func__, rc);
 			goto err_data;
 		}
-	} else {
-#if IS_ENABLED(CONFIG_TCPC_CLASS)
-		dev_err(fsa_priv->dev, "%s: start register 3rd protocal stack notifier\n", __func__);
-		tcpc = tcpc_dev_get_by_name("type_c_port0");
-		if (!tcpc) {
-			if (probe_retry > 30) {
-				dev_err(fsa_priv->dev, "%s: get tcpc failed, jump tcp register\n", __func__);
-				rc = 0;
-				goto tcp_register_finish;
-			} else {
-				probe_retry++;
-				dev_err(fsa_priv->dev, "%s: get tcpc failed, retry:%d \n", __func__, probe_retry);
-				usleep_range(1*1000, 1*1005);
-				rc = -EPROBE_DEFER;
+#else /* OPLUS_ARCH_EXTENDS */
+		if (fsa_priv->usb_protocal != 1) {
+			rc = register_ucsi_glink_notifier(&fsa_priv->nb);
+			if (rc) {
+				dev_err(fsa_priv->dev, "%s: ucsi glink notifier registration failed: %d\n",
+					__func__, rc);
 				goto err_data;
 			}
+		} else {
+#if IS_ENABLED(CONFIG_TCPC_CLASS)
+			dev_info(fsa_priv->dev, "%s: start register 3rd protocal stack notifier\n", __func__);
+			fsa_priv->tcpc = tcpc_dev_get_by_name("type_c_port0");
+			if (!fsa_priv->tcpc) {
+				if (probe_retry > 30) {
+					dev_err(fsa_priv->dev, "%s: get tcpc failed, jump tcp register\n", __func__);
+					rc = 0;
+					goto tcp_register_finish;
+				} else {
+					probe_retry++;
+					dev_err(fsa_priv->dev, "%s: get tcpc failed, retry:%d \n", __func__, probe_retry);
+					usleep_range(1*1000, 1*1005);
+					rc = -EPROBE_DEFER;
+					goto err_data;
+				}
+			}
+			rc = register_tcp_dev_notifier(fsa_priv->tcpc, &fsa_priv->nb, TCP_NOTIFY_TYPE_USB);
+			if (rc) {
+				dev_err(fsa_priv->dev, "%s: ucsi glink notifier registration failed: %d\n",
+					__func__, rc);
+				goto err_data;
+			}
+#endif
 		}
-		rc = register_tcp_dev_notifier(tcpc, &fsa_priv->ucsi_nb, TCP_NOTIFY_TYPE_USB);
-		if (rc) {
-			dev_err(fsa_priv->dev, "%s: ucsi glink notifier registration failed: %d\n",
+#endif /* OPLUS_ARCH_EXTENDS */
+	} else {
+		fsa_priv->use_powersupply = 1;
+		fsa_priv->usb_psy = power_supply_get_by_name("usb");
+		if (!fsa_priv->usb_psy) {
+			rc = -EPROBE_DEFER;
+			dev_dbg(fsa_priv->dev,
+				"%s: could not get USB psy info: %d\n",
 				__func__, rc);
 			goto err_data;
 		}
-#endif
-	}
 
+		fsa_priv->iio_ch = iio_channel_get(fsa_priv->dev, "typec_mode");
+		if (!fsa_priv->iio_ch) {
+			dev_err(fsa_priv->dev,
+				"%s: iio_channel_get failed for typec_mode\n",
+				__func__);
+			goto err_supply;
+		}
+		rc = power_supply_reg_notifier(&fsa_priv->nb);
+		if (rc) {
+			dev_err(fsa_priv->dev,
+				"%s: power supply reg failed: %d\n",
+			__func__, rc);
+			goto err_supply;
+		}
+	}
+#ifdef OPLUS_ARCH_EXTENDS
 #if IS_ENABLED(CONFIG_TCPC_CLASS)
 tcp_register_finish:
 #endif
-	#endif /* OPLUS_ARCH_EXTENDS */
+#endif /* OPLUS_ARCH_EXTENDS */
+#ifdef OPLUS_ARCH_EXTENDS
+	/* add WAS4783 support */
+	mutex_init(&fsa_priv->noti_lock);
 
+	if (fsa_priv->vendor == WAS4783) {
+		fsa_priv->chg_nb.notifier_call = typec_switch_chg_event_changed;
+		fsa_priv->chg_nb.priority = 0;
+		rc = register_chg_glink_notifier(&fsa_priv->chg_nb);
+		if (rc) {
+			if (use_powersupply == 0) {
+				if (fsa_priv->usb_protocal != 1) {
+					unregister_ucsi_glink_notifier(&fsa_priv->nb);
+				} else {
+					#if IS_ENABLED(CONFIG_TCPC_CLASS)
+					if (fsa_priv->tcpc)
+						unregister_tcp_dev_notifier(fsa_priv->tcpc, &fsa_priv->nb, TCP_NOTIFY_TYPE_USB);
+					#endif
+				}
+			} else {
+				/* deregister from PMI */
+				power_supply_unreg_notifier(&fsa_priv->nb);
+				power_supply_put(fsa_priv->usb_psy);
+			}
+
+			mutex_destroy(&fsa_priv->noti_lock);
+			dev_err(fsa_priv->dev, "%s: charge glink notifier registration failed: %d\n",
+				__func__, rc);
+			goto err_data;
+		}
+	}
+#endif /* OPLUS_ARCH_EXTENDS */
 	mutex_init(&fsa_priv->notification_lock);
 	i2c_set_clientdata(i2c, fsa_priv);
 
@@ -803,11 +1220,13 @@ tcp_register_finish:
 
 	#ifdef OPLUS_ARCH_EXTENDS
 	/* Add for log */
-	pr_err("%s: finished\n", __func__);
+	pr_info("%s: finished\n", __func__);
 	#endif /* OPLUS_ARCH_EXTENDS */
 
 	return 0;
 
+err_supply:
+	power_supply_put(fsa_priv->usb_psy);
 err_data:
 	#ifdef OPLUS_ARCH_EXTENDS
 	/* Add for log */
@@ -826,13 +1245,37 @@ err_data:
 
 static int fsa4480_remove(struct i2c_client *i2c)
 {
+	#ifdef OPLUS_ARCH_EXTENDS
+	/*add for 3rd protocal stack notifier*/
+	#if IS_ENABLED(CONFIG_TCPC_CLASS)
+	int ret = 0;
+	#endif
+	#endif /* OPLUS_ARCH_EXTENDS */
 	struct fsa4480_priv *fsa_priv =
 			(struct fsa4480_priv *)i2c_get_clientdata(i2c);
 
 	if (!fsa_priv)
 		return -EINVAL;
 
-	unregister_ucsi_glink_notifier(&fsa_priv->ucsi_nb);
+	#ifdef OPLUS_ARCH_EXTENDS
+	/*add for 3rd protocal stack notifier*/
+	#if IS_ENABLED(CONFIG_TCPC_CLASS)
+	if (fsa_priv->tcpc) {
+		ret = unregister_tcp_dev_notifier(fsa_priv->tcpc, &fsa_priv->ucsi_nb, TCP_NOTIFY_TYPE_ALL);
+		if (ret < 0) {
+			pr_err("%s unregister tcpc notifier fail(%d)\n", __func__);
+		}
+	}
+	#endif
+	#endif /* OPLUS_ARCH_EXTENDS */
+
+	if (fsa_priv->use_powersupply) {
+		/* deregister from PMI */
+		power_supply_unreg_notifier(&fsa_priv->nb);
+		power_supply_put(fsa_priv->usb_psy);
+	} else {
+		unregister_ucsi_glink_notifier(&fsa_priv->nb);
+	}
 	fsa4480_usbc_update_settings(fsa_priv, 0x18, 0x98);
 	cancel_work_sync(&fsa_priv->usbc_analog_work);
 	pm_relax(fsa_priv->dev);
@@ -842,6 +1285,11 @@ static int fsa4480_remove(struct i2c_client *i2c)
 	if (gpio_is_valid(fsa_priv->hs_det_pin)) {
 		gpio_free(fsa_priv->hs_det_pin);
 	}
+	/*add WAS4783 support*/
+	if (fsa_priv->vendor == WAS4783) {
+		unregister_chg_glink_notifier(&fsa_priv->chg_nb);
+	}
+	mutex_destroy(&fsa_priv->noti_lock);
 	devm_kfree(&i2c->dev, fsa_priv);
 	#endif /* OPLUS_ARCH_EXTENDS */
 	dev_set_drvdata(&i2c->dev, NULL);
