@@ -182,6 +182,15 @@ config OPLUS_TPS6128XD_CHARGER
 	bool "tps6128xd support"
 	help
 	  Say Y here to declare tps6128xd support
+config OPLUS_AUDIO_SWITCH_GLINK
+	bool "audio switch glink support"
+	help
+	  Say Y here to declare audio switch glink support
 endif
 
+config OPLUS_VOOCPHY_MAX77939
+	bool "bidirect cp max77939 support"
+	depends on OPLUS_CHG_VOOCPHY_CHGLIB && OPLUS_CHG_AP_VOOCPHY
+	help
+	  Say Y here to declare bidirect cp max77939 support
 #endif
