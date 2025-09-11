@@ -536,6 +536,7 @@ config OPLUS_RF_CABLE_MONITOR
 	help
 	  Say Y here to enable OPLUS rf cable monitor system support
 #endif /* OPLUS_FEATURE_RF_CABLE_DETECT */
+
 #ifdef OPLUS_FEATURE_SIM_DETECT
 config SIM_DETECT
 	tristate "SIM_DETECT system"
@@ -552,12 +553,14 @@ config OEM_QMI
 	  Say Y here to enable oem qmi support
 #endif /* OPLUS_FEATURE_SIM_DETECT */
 
+#ifdef OPLUS_FEATURE_ESIM
 #change 'y' to 'n', if you want fo close this controller
 config OPLUS_GPIO
     tristate "oplus gpio controller"
     default n
     help
       define this config to control oplus gpio.
+#endif /* OPLUS_FEATURE_ESIM */
 
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
