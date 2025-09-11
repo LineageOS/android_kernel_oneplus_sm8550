@@ -16,6 +16,24 @@
       "message": "All this new support for more devices made me want even more to have oplus kernel modules in sm8550-modules repo. ( CC: @chandudyavanapelli03@gmail.com :P )",
       "revId": "0feb3b0d8f501cdf9283a27082ec351dcf6a6d07",
       "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71"
+    },
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "babc1256_3098a63f",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 4
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 32811
+      },
+      "writtenOn": "2025-09-11T08:23:07Z",
+      "side": 1,
+      "message": "I used to use kernel structure like that before rebasing back to lineage-22.2, maybe you can take a look?",
+      "parentUuid": "ad6b985a_06e5016f",
+      "revId": "0feb3b0d8f501cdf9283a27082ec351dcf6a6d07",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71"
     }
   ]
 }
