@@ -34,6 +34,24 @@
       "parentUuid": "af5f830a_6fbe47c4",
       "revId": "64cad48c87c6e3dc7dd696996ef0e9f1634bf7d9",
       "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71"
+    },
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "583d8b8e_73224cd7",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 6
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 13648
+      },
+      "writtenOn": "2025-09-13T12:24:01Z",
+      "side": 1,
+      "message": "Not the the current HEAD. I will pick the \"big move\" change after this.",
+      "parentUuid": "54213e4c_103f0c80",
+      "revId": "64cad48c87c6e3dc7dd696996ef0e9f1634bf7d9",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71"
     }
   ]
 }
