@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "a6afefea_9e7d213d",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 6
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 13648
+      },
+      "writtenOn": "2025-09-21T11:49:54Z",
+      "side": 1,
+      "message": "In case you guys want to revert it as well on your kernels. The proper fix was https://review.lineageos.org/c/LineageOS/android_device_oneplus_sm8550-common/+/452378.",
+      "revId": "6e010ba09dfe7511c4e3a90285ad21b7a9ee2213",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71"
+    }
+  ]
+}
