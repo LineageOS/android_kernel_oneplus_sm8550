@@ -16,6 +16,23 @@
       "message": "Let\u0027s hold this for a bit.",
       "revId": "d917e36fecf6bd9f2e6b554f94d979dcb37e9ca5",
       "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71"
+    },
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "bd2b18c6_f47e5a53",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 10
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 13648
+      },
+      "writtenOn": "2025-09-21T11:52:54Z",
+      "side": 1,
+      "message": "Alternative: https://review.lineageos.org/c/LineageOS/android_kernel_oneplus_sm8550/+/452376 + https://review.lineageos.org/c/LineageOS/android_kernel_oneplus_sm8550/+/452375",
+      "revId": "d917e36fecf6bd9f2e6b554f94d979dcb37e9ca5",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71"
     }
   ]
 }
