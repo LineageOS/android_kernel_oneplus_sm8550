@@ -292,7 +292,7 @@ static struct mhi_event_config qcom_sxr_mhi_events[] = {
 
 static const struct mhi_controller_config qcom_sxr_mhi_config = {
 	.max_channels = 128,
-	.timeout_ms = 10000,
+	.timeout_ms = 2000,
 	.buf_len = 0x8000,
 	.num_channels = ARRAY_SIZE(qcom_sxr_mhi_channels),
 	.ch_cfg = qcom_sxr_mhi_channels,
@@ -341,7 +341,7 @@ static const struct mhi_pci_dev_info mhi_qcom_lemans_info = {
 static const struct mhi_pci_dev_info mhi_qcom_sdx75_info = {
 	.device_id = 0x0309,
 	.name = "esoc0",
-	.fw_image = "sdx75m/xbl.elf",
+	.fw_image = "sdx75m/xbl_s.melf",
 	.edl_image = "sdx75m/edl.mbn",
 	.config = &modem_qcom_sdx65_mhi_config,
 	.bar_num = MHI_PCI_BAR_NUM,
