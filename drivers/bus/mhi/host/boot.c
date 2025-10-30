@@ -30,8 +30,8 @@ void mhi_rddm_prepare(struct mhi_controller *mhi_cntrl,
 	unsigned int i;
 
 	for (i = 0; i < img_info->entries - 1; i++, mhi_buf++, bhi_vec++) {
-		bhi_vec->dma_addr = cpu_to_le64(mhi_buf->dma_addr);
-		bhi_vec->size = cpu_to_le64(mhi_buf->len);
+		bhi_vec->dma_addr = mhi_buf->dma_addr;
+		bhi_vec->size = mhi_buf->len;
 	}
 
 	MHI_VERB(dev, "BHIe programming for RDDM\n");
@@ -58,9 +58,9 @@ int mhi_rddm_download_status(struct mhi_controller *mhi_cntrl)
 {
 	u32 rx_status;
 	enum mhi_ee_type ee;
-	const u32 delayus = 5000;
+	const u32 delayms = 5;
 	void __iomem *base = mhi_cntrl->bhie;
-	u32 retry = (mhi_cntrl->timeout_ms * 1000) / delayus;
+	u32 retry = (mhi_cntrl->timeout_ms) / delayms;
 	struct device *dev = &mhi_cntrl->mhi_dev->dev;
 	int ret = 0;
 
@@ -77,7 +77,7 @@ int mhi_rddm_download_status(struct mhi_controller *mhi_cntrl)
 			return 0;
 		}
 
-		usleep_range(delayus, delayus + 100);
+		msleep(delayms);
 	}
 
 	ee = mhi_get_exec_env(mhi_cntrl);
@@ -94,7 +94,8 @@ static int __mhi_download_rddm_in_panic(struct mhi_controller *mhi_cntrl)
 	int ret;
 	enum mhi_ee_type ee;
 	const u32 delayus = 2000;
-	int rddm_retry = mhi_cntrl->rddm_timeout_us / delayus;
+	const u32 rddm_timeout_us = 200000;
+	int rddm_retry = rddm_timeout_us / delayus;
 	struct device *dev = &mhi_cntrl->mhi_dev->dev;
 
 	MHI_VERB(dev, "Entered with pm_state:%s dev_state:%s ee:%s\n",
@@ -389,20 +390,21 @@ error_alloc_mhi_buf:
 }
 
 static void mhi_firmware_copy(struct mhi_controller *mhi_cntrl,
-			      const struct firmware *firmware,
+			      const u8 *img_buf,
+			      size_t img_size,
 			      struct image_info *img_info)
 {
-	size_t remainder = firmware->size;
+	size_t remainder = img_size;
 	size_t to_cpy;
-	const u8 *buf = firmware->data;
+	const u8 *buf = img_buf;
 	struct mhi_buf *mhi_buf = img_info->mhi_buf;
 	struct bhi_vec_entry *bhi_vec = img_info->bhi_vec;
 
 	while (remainder) {
 		to_cpy = min(remainder, mhi_buf->len);
 		memcpy(mhi_buf->buf, buf, to_cpy);
-		bhi_vec->dma_addr = cpu_to_le64(mhi_buf->dma_addr);
-		bhi_vec->size = cpu_to_le64(to_cpy);
+		bhi_vec->dma_addr = mhi_buf->dma_addr;
+		bhi_vec->size = to_cpy;
 
 		buf += to_cpy;
 		remainder -= to_cpy;
@@ -419,8 +421,9 @@ void mhi_fw_load_handler(struct mhi_controller *mhi_cntrl)
 	const char *fw_name;
 	void *buf;
 	dma_addr_t dma_addr;
-	size_t size;
+	size_t size, img_size;
 	int i, ret;
+	const u8 *img_buf;
 
 	if (MHI_PM_IN_ERROR_STATE(mhi_cntrl->pm_state)) {
 		MHI_ERR(dev, "Device MHI is not in valid state\n");
@@ -514,15 +517,23 @@ void mhi_fw_load_handler(struct mhi_controller *mhi_cntrl)
 	 * device transitioning into MHI READY state
 	 */
 	if (mhi_cntrl->fbc_download) {
-		ret = mhi_alloc_bhie_table(mhi_cntrl, &mhi_cntrl->fbc_image,
-					   firmware->size);
+
+		img_size = firmware->size;
+		img_buf = firmware->data;
+		/* TME supported image needs to be download from end of SBL image */
+		if (mhi_cntrl->tme_supported_image) {
+			img_buf = firmware->data + mhi_cntrl->sbl_size;
+			img_size = img_size - mhi_cntrl->sbl_size;
+		}
+
+		ret = mhi_alloc_bhie_table(mhi_cntrl, &mhi_cntrl->fbc_image, img_size);
 		if (ret) {
 			release_firmware(firmware);
 			goto error_fw_load;
 		}
 
 		/* Load the firmware into BHIE vec table */
-		mhi_firmware_copy(mhi_cntrl, firmware, mhi_cntrl->fbc_image);
+		mhi_firmware_copy(mhi_cntrl, img_buf, img_size, mhi_cntrl->fbc_image);
 	}
 
 	release_firmware(firmware);
