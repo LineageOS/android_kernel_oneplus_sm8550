@@ -326,9 +326,22 @@ static int eusb2_repeater_init(struct usb_repeater *ur)
 			container_of(ur, struct eusb2_repeater, ur);
 	unsigned int rptr_init_cnt = INIT_MAX_CNT;
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	if ((ur->flags & PHY_HOST_MODE) && er->param_override_seq_host) {
+		eusb2_repeater_update_seq(er, er->param_override_seq_host,
+			er->param_override_seq_cnt_host);
+		dev_err(er->ur.dev, "Using host eye-diagram parameters!\n");
+	} else if (er->param_override_seq) {
+	/* override init sequence using devicetree based values */
+		eusb2_repeater_update_seq(er, er->param_override_seq,
+			er->param_override_seq_cnt);
+		dev_err(er->ur.dev, "Using device eye-diagram parameters!\n");
+	}
+#else
 	/* override init sequence using devicetree based values */
 	eusb2_repeater_update_seq(er, er->param_override_seq,
 			er->param_override_seq_cnt);
+#endif
 
 	/* override tune params using debugfs based values */
 	if (er->usb2_crossover <= 0x7)
