@@ -149,6 +149,8 @@ struct vfe_device {
 	char irq_name[30];
 	struct camss_clock *clock;
 	int nclocks;
+	struct resources_icc *icc_clk;
+	int nicc_clks;
 	struct completion reset_complete;
 	struct completion halt_complete;
 	struct mutex power_lock;

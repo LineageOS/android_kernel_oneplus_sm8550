@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/kernel.h>
@@ -500,7 +500,6 @@ static int tgu_probe(struct amba_device *adev, const struct amba_id *id)
 	dev_dbg(dev, "TGU initialized\n");
 	return 0;
 err:
-	pm_runtime_put(&adev->dev);
 	return ret;
 }
 

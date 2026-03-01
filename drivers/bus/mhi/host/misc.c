@@ -256,6 +256,12 @@ void mhi_reg_write_work(struct work_struct *w)
 		if (!mhi_is_active(mhi_cntrl))
 			break;
 
+		/*
+		 * Prevent reordering to ensure updated val and reg_addr values
+		 * are loaded after valid is loaded. This is to prevent stale
+		 * values from being loaded before valid is checked.
+		 */
+		smp_rmb();
 		writel_relaxed(info->val, info->reg_addr);
 		info->valid = false;
 		mhi_priv->read_idx =

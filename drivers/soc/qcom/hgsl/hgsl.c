@@ -2154,22 +2154,20 @@ static int hgsl_ioctl_hyp_generic_transaction(struct file *filep,
 	int ret_value = 0;
 	int *pRval = NULL;
 
-	memset(pSend, 0, sizeof(pSend));
-	memset(pReply, 0, sizeof(pReply));
-
 	if (copy_from_user(&params, USRPTR(arg), sizeof(params))) {
 		LOGE("failed to copy params from user\n");
-		ret = -EFAULT;
-		goto out;
+		return -EFAULT;
 	}
 
 	if ((params.send_num > HGSL_HYP_GENERAL_MAX_SEND_NUM) ||
 		(params.reply_num > HGSL_HYP_GENERAL_MAX_REPLY_NUM)) {
-		ret = -EINVAL;
 		LOGE("invalid Send %d or reply %d number\n",
 			params.send_num, params.reply_num);
-		goto out;
+		return -EINVAL;
 	}
+
+	memset(pSend, 0, sizeof(pSend));
+	memset(pReply, 0, sizeof(pReply));
 
 	for (i = 0; i < params.send_num; i++) {
 		if ((params.send_size[i] > HGSL_HYP_GENERAL_MAX_SIZE) ||
@@ -2177,19 +2175,27 @@ static int hgsl_ioctl_hyp_generic_transaction(struct file *filep,
 			LOGE("Invalid size 0x%x for %d\n", params.send_size[i], i);
 			ret = -EINVAL;
 			goto out;
-		} else {
-			pSend[i] = hgsl_malloc(params.send_size[i]);
-			if (pSend[i] == NULL) {
-				ret = -ENOMEM;
-				goto out;
-			}
-			if (copy_from_user(pSend[i],
-				USRPTR(params.send_data[i]),
-				params.send_size[i])) {
-				LOGE("Failed to copy send data %d\n", i);
-				ret = -EFAULT;
-				goto out;
-			}
+		}
+		if (hgsl_check_userparams(params.send_data[i],
+			params.send_size[i])) {
+			LOGE("invalid send data or size (0x%llx, 0x%x)",
+				params.send_data[i],
+				params.send_size[i]);
+			ret = -EINVAL;
+			goto out;
+		}
+
+		pSend[i] = hgsl_malloc(params.send_size[i]);
+		if (pSend[i] == NULL) {
+			ret = -ENOMEM;
+			goto out;
+		}
+		if (copy_from_user(pSend[i],
+			USRPTR(params.send_data[i]),
+			params.send_size[i])) {
+			LOGE("Failed to copy send data %d\n", i);
+			ret = -EFAULT;
+			goto out;
 		}
 	}
 
@@ -2198,18 +2204,32 @@ static int hgsl_ioctl_hyp_generic_transaction(struct file *filep,
 			(params.reply_size[i] == 0)) {
 			ret = -EINVAL;
 			goto out;
-		} else {
-			pReply[i] = hgsl_malloc(params.reply_size[i]);
-			if (pReply[i] == NULL) {
-				ret = -ENOMEM;
-				goto out;
-			}
-			memset(pReply[i], 0, params.reply_size[i]);
+		}
+		if (hgsl_check_userparams(params.reply_data[i],
+			params.reply_size[i])) {
+			LOGE("invalid reply data or size (0x%llx, 0x%x)",
+				params.reply_data[i],
+				params.reply_size[i]);
+			ret = -EINVAL;
+			goto out;
+		}
+
+		pReply[i] = hgsl_zalloc(params.reply_size[i]);
+		if (pReply[i] == NULL) {
+			ret = -ENOMEM;
+			goto out;
 		}
 	}
 
-	if (params.ret_value)
+	if (params.ret_value) {
+		if (hgsl_check_userparams(
+			params.ret_value, sizeof(ret_value))) {
+			LOGE("invalid ret data (0x%llx)", params.ret_value);
+			ret = -EINVAL;
+			goto out;
+		}
 		pRval = &ret_value;
+	}
 
 	ret = hgsl_hyp_generic_transaction(&priv->hyp_priv,
 					&params, pSend, pReply, pRval);
@@ -2256,6 +2276,12 @@ static int hgsl_ioctl_mem_alloc(struct file *filep, unsigned long arg)
 	if (copy_from_user(&params, USRPTR(arg), sizeof(params))) {
 		LOGE("failed to copy params from user");
 		ret = -EFAULT;
+		goto out;
+	}
+	if (hgsl_check_userparams(
+		params.memdesc, sizeof(struct gsl_memdesc_t))) {
+		LOGE("invalid input memdesc (0x%llx)", params.memdesc);
+		ret = -EINVAL;
 		goto out;
 	}
 
@@ -2338,6 +2364,14 @@ static int hgsl_ioctl_mem_free(struct file *filep, unsigned long arg)
 		ret = -EFAULT;
 		goto out;
 	}
+
+	if (hgsl_check_userparams(
+		params.memdesc, sizeof(memdesc))) {
+		LOGE("invalid input memdesc (0x%llx)", params.memdesc);
+		ret = -EINVAL;
+		goto out;
+	}
+
 	if (copy_from_user(&memdesc, USRPTR(params.memdesc),
 		sizeof(memdesc))) {
 		LOGE("failed to copy memdesc from user");
@@ -2395,6 +2429,13 @@ static int hgsl_ioctl_set_metainfo(struct file *filep, unsigned long arg)
 		ret = -EINVAL;
 		goto out;
 	}
+
+	if (hgsl_check_userparams(
+		params.metainfo, params.metainfo_len)) {
+		LOGE("invalid input metainfo (0x%llx)", params.metainfo);
+		return -EINVAL;
+	}
+
 	if (copy_from_user(metainfo, USRPTR(params.metainfo),
 					params.metainfo_len)) {
 		LOGE("failed to copy metainfo from user");
@@ -2601,6 +2642,13 @@ static int hgsl_ioctl_mem_get_fd(struct file *filep, unsigned long arg)
 		ret = -EFAULT;
 		goto out;
 	}
+
+	if (hgsl_check_userparams(
+		params.memdesc, sizeof(memdesc))) {
+		LOGE("invalid input memdesc 0x%llx", params.memdesc);
+		return -EINVAL;
+	}
+
 	if (copy_from_user(&memdesc, USRPTR(params.memdesc),
 		sizeof(memdesc))) {
 		LOGE("failed to copy memdesc from user");
@@ -2755,6 +2803,13 @@ static int hgsl_ioctl_issueib(struct file *filep, unsigned long arg)
 		remote_issueib = true;
 	} else {
 		ib_size = params.num_ibs * sizeof(struct hgsl_ibdesc);
+		if (hgsl_check_userparams(params.ibs, ib_size)) {
+			LOGE("invalid input ibs (0x%llx, 0x%llx)",
+				params.ibs, ib_size);
+			ret = -EINVAL;
+			goto out;
+		}
+
 		ibs = hgsl_malloc(ib_size);
 		if (ibs == NULL) {
 			ret = -ENOMEM;
@@ -2824,6 +2879,13 @@ static int hgsl_ioctl_issueib_with_alloc_list(struct file *filep,
 		remote_issueib = true;
 	} else {
 		ib_size = params.num_ibs * sizeof(struct gsl_command_buffer_object_t);
+		if (hgsl_check_userparams(params.ibs, ib_size)) {
+			LOGE("invalid input ib list (0x%llx, 0x%llx)",
+				params.ibs, ib_size);
+			ret = -EINVAL;
+			goto out;
+		}
+
 		ibs = hgsl_malloc(ib_size);
 		if (ibs == NULL) {
 			ret = -ENOMEM;
@@ -2837,6 +2899,14 @@ static int hgsl_ioctl_issueib_with_alloc_list(struct file *filep,
 		if (params.num_allocations != 0) {
 			allocation_size = params.num_allocations *
 				sizeof(struct gsl_memory_object_t);
+			if (hgsl_check_userparams(
+				params.allocations, allocation_size)) {
+				LOGE("invalid input allocations (0x%llx, 0x%llx)",
+					params.allocations, allocation_size);
+				ret = -EINVAL;
+				goto out;
+			}
+
 			allocations = hgsl_malloc(allocation_size);
 			if (allocations == NULL) {
 				ret = -ENOMEM;
@@ -2857,6 +2927,14 @@ static int hgsl_ioctl_issueib_with_alloc_list(struct file *filep,
 		}
 		be_data_size = (params.num_ibs + params.num_allocations) *
 			(sizeof(struct gsl_memdesc_t) + sizeof(uint64_t));
+		if (hgsl_check_userparams(
+			params.be_data, be_data_size)) {
+			LOGE("invalid input be_data (0x%llx, 0x%llx)",
+				params.be_data, be_data_size);
+			ret = -EINVAL;
+			goto out;
+		}
+
 		be_descs = (struct gsl_memdesc_t *)hgsl_malloc(be_data_size);
 		if (be_descs == NULL) {
 			ret = -ENOMEM;
@@ -3068,10 +3146,16 @@ static int hgsl_ioctl_syncobj_wait_multiple(struct file *filep,
 	(param.num_syncobjs > (SIZE_MAX / sizeof(int32_t)))) {
 		LOGE("invalid num_syncobjs %zu", param.num_syncobjs);
 		return -EINVAL;
-		goto out;
 	}
 
 	rpc_syncobj_size = sizeof(uint64_t) * param.num_syncobjs;
+	if (hgsl_check_userparams(
+		param.rpc_syncobj, rpc_syncobj_size)) {
+		LOGE("invalid input rpc_syncobj (0x%llx, 0x%llx)",
+			param.rpc_syncobj, rpc_syncobj_size);
+		return -EINVAL;
+	}
+
 	rpc_syncobj = (uint64_t *)hgsl_malloc(rpc_syncobj_size);
 	if (rpc_syncobj == NULL) {
 		LOGE("failed to allocate memory");
@@ -3086,13 +3170,12 @@ static int hgsl_ioctl_syncobj_wait_multiple(struct file *filep,
 	}
 
 	status_size = sizeof(int32_t) * param.num_syncobjs;
-	status = (int32_t *)hgsl_malloc(status_size);
+	status = (int32_t *)hgsl_zalloc(status_size);
 	if (status == NULL) {
 		LOGE("failed to allocate memory");
 		ret = -ENOMEM;
 		goto out;
 	}
-	memset(status, 0, status_size);
 
 	ret = hgsl_hyp_syncobj_wait_multiple(&priv->hyp_priv, rpc_syncobj,
 		param.num_syncobjs, param.timeout_ms, status, &param.result);
@@ -3123,6 +3206,7 @@ static int hgsl_ioctl_perfcounter_select(struct file *filep, unsigned long arg)
 	uint32_t *counter_ids = NULL;
 	uint32_t *counter_val_regs = NULL;
 	uint32_t *counter_val_hi_regs = NULL;
+	uint32_t usize = 0;
 
 	if (copy_from_user(&param, USRPTR(arg), sizeof(param))) {
 		LOGE("failed to copy param from user");
@@ -3131,14 +3215,27 @@ static int hgsl_ioctl_perfcounter_select(struct file *filep, unsigned long arg)
 	}
 
 	if ((param.num_counters <= 0) ||
-		(param.num_counters > (SIZE_MAX / (sizeof(int32_t) * 4)))) {
+		(param.num_counters > (S32_MAX / (sizeof(int32_t) * 4)))) {
 		LOGE("invalid num_counters %zu", param.num_counters);
 		return -EINVAL;
-		goto out;
 	}
 
-	groups = (uint32_t *)hgsl_malloc(
-		sizeof(int32_t) * 4 * param.num_counters);
+	usize = sizeof(uint32_t) * param.num_counters;
+	if (hgsl_check_userparams(param.groups, usize) ||
+		hgsl_check_userparams(param.counter_ids, usize) ||
+		hgsl_check_userparams(param.counter_val_regs, usize) ||
+		(param.counter_val_hi_regs &&
+			hgsl_check_userparams(param.counter_val_hi_regs, usize))) {
+		LOGE("invalid input uaddr or usize (0x%llx, 0x%llx, 0x%llx, 0x%llx 0x%x)",
+			param.groups,
+			param.counter_ids,
+			param.counter_val_regs,
+			param.counter_val_hi_regs,
+			usize);
+		return -EINVAL;
+	}
+
+	groups = (uint32_t *)hgsl_malloc(usize * 4);
 	if (groups == NULL) {
 		LOGE("failed to allocate memory");
 		ret = -ENOMEM;
@@ -3150,13 +3247,13 @@ static int hgsl_ioctl_perfcounter_select(struct file *filep, unsigned long arg)
 	counter_val_hi_regs = counter_val_regs + param.num_counters;
 
 	if (copy_from_user(groups, USRPTR(param.groups),
-		sizeof(uint32_t) * param.num_counters)) {
+		usize)) {
 		LOGE("failed to copy groups from user");
 		ret = -EFAULT;
 		goto out;
 	}
 	if (copy_from_user(counter_ids, USRPTR(param.counter_ids),
-		sizeof(uint32_t) * param.num_counters)) {
+		usize)) {
 		LOGE("failed to copy counter_ids from user");
 		ret = -EFAULT;
 		goto out;
@@ -3172,14 +3269,14 @@ static int hgsl_ioctl_perfcounter_select(struct file *filep, unsigned long arg)
 		}
 		if (copy_to_user(USRPTR(param.counter_val_regs),
 			counter_val_regs,
-			sizeof(uint32_t) * param.num_counters)) {
+			usize)) {
 			ret = -EFAULT;
 			goto out;
 		}
 		if (param.counter_val_hi_regs) {
 			if (copy_to_user(USRPTR(param.counter_val_hi_regs),
 				counter_val_hi_regs,
-				sizeof(uint32_t) * param.num_counters)) {
+				usize)) {
 				ret = -EFAULT;
 				goto out;
 			}
@@ -3199,6 +3296,7 @@ static int hgsl_ioctl_perfcounter_deselect(struct file *filep,
 	int ret = 0;
 	uint32_t *groups = NULL;
 	uint32_t *counter_ids = NULL;
+	uint32_t usize = 0;
 
 	if (copy_from_user(&param, USRPTR(arg), sizeof(param))) {
 		LOGE("failed to copy param from user");
@@ -3207,14 +3305,22 @@ static int hgsl_ioctl_perfcounter_deselect(struct file *filep,
 	}
 
 	if ((param.num_counters <= 0) ||
-		(param.num_counters > (SIZE_MAX / (sizeof(int32_t) * 2)))) {
+		(param.num_counters > (S32_MAX / (sizeof(int32_t) * 2)))) {
 		LOGE("invalid num_counters %zu", param.num_counters);
 		return -EINVAL;
-		goto out;
 	}
 
-	groups = (uint32_t *)hgsl_malloc(
-		sizeof(int32_t) * 2 * param.num_counters);
+	usize = sizeof(uint32_t) * param.num_counters;
+	if (hgsl_check_userparams(param.groups, usize) ||
+		hgsl_check_userparams(param.counter_ids, usize)) {
+		LOGE("invalid input uaddr or usize (0x%llx, 0x%llx, 0x%x)",
+			param.groups,
+			param.counter_ids,
+			usize);
+		return -EINVAL;
+	}
+
+	groups = (uint32_t *)hgsl_malloc(usize * 2);
 	if (groups == NULL) {
 		LOGE("failed to allocate memory");
 		ret = -ENOMEM;
@@ -3224,13 +3330,13 @@ static int hgsl_ioctl_perfcounter_deselect(struct file *filep,
 	counter_ids = groups + param.num_counters;
 
 	if (copy_from_user(groups, USRPTR(param.groups),
-				sizeof(uint32_t) * param.num_counters)) {
+				usize)) {
 		LOGE("failed to copy groups from user");
 		ret = -EFAULT;
 		goto out;
 	}
 	if (copy_from_user(counter_ids, USRPTR(param.counter_ids),
-				sizeof(uint32_t) * param.num_counters)) {
+				usize)) {
 		LOGE("failed to copy counter_ids from user");
 		ret = -EFAULT;
 		goto out;
@@ -3250,6 +3356,7 @@ static int hgsl_ioctl_perfcounter_query_selection(struct file *filep,
 	struct hgsl_ioctl_perfcounter_query_selections_params param;
 	int ret = 0;
 	int32_t *selections = NULL;
+	uint32_t size = 0;
 
 	if (copy_from_user(&param, USRPTR(arg), sizeof(param))) {
 		LOGE("failed to copy param from user");
@@ -3258,20 +3365,23 @@ static int hgsl_ioctl_perfcounter_query_selection(struct file *filep,
 	}
 
 	if ((param.num_counters <= 0) ||
-		(param.num_counters > (SIZE_MAX / sizeof(int32_t)))) {
+		(param.num_counters > (S32_MAX / sizeof(int32_t)))) {
 		LOGE("invalid num_counters %zu", param.num_counters);
 		return -EINVAL;
-		goto out;
 	}
-
-	selections = (int32_t *)hgsl_malloc(
-		sizeof(int32_t) * param.num_counters);
+	size = sizeof(int32_t) * param.num_counters;
+	if (param.selections && hgsl_check_userparams(
+			param.selections, size)) {
+		LOGE("invalid input selections (0x%llx, 0x%x)",
+			param.selections, size);
+		return -EINVAL;
+	}
+	selections = (int32_t *)hgsl_zalloc(size);
 	if (selections == NULL) {
 		LOGE("failed to allocate memory");
 		ret = -ENOMEM;
 		goto out;
 	}
-	memset(selections, 0, sizeof(int32_t)  * param.num_counters);
 
 	ret = hgsl_hyp_perfcounter_query_selections(&priv->hyp_priv,
 							&param, selections);
@@ -3283,12 +3393,10 @@ static int hgsl_ioctl_perfcounter_query_selection(struct file *filep,
 		ret = -EFAULT;
 		goto out;
 	}
-	if (param.selections != 0) {
-		if (copy_to_user(USRPTR(param.selections), selections,
-			sizeof(int32_t) * param.num_counters)) {
-			ret = -EFAULT;
-			goto out;
-		}
+	if (param.selections && copy_to_user(
+			USRPTR(param.selections), selections, size)) {
+		ret = -EFAULT;
+		goto out;
 	}
 
 out:
@@ -3722,6 +3830,11 @@ static int hgsl_ioctl_timeline_signal(struct file *filep,
 		param.timelines_size = sizeof(struct hgsl_timeline_val);
 
 	timelines = param.timelines;
+	if (hgsl_check_userparams(timelines,
+		param.timelines_size * param.count)) {
+		LOGE("invalid signal timelines (0x%llx)", timelines);
+		return -EINVAL;
+	}
 
 	for (i = 0; i < param.count; i++) {
 		//struct hgsl_timeline *timeline;
@@ -3760,6 +3873,11 @@ static int hgsl_ioctl_timeline_query(struct file *filep,
 		param.timelines_size = sizeof(struct hgsl_timeline_val);
 
 	timelines = param.timelines;
+	if (hgsl_check_userparams(timelines,
+		param.timelines_size * param.count)) {
+		LOGE("invalid input timelines (0x%llx)", timelines);
+		return -EINVAL;
+	}
 
 	for (i = 0; i < param.count; i++) {
 		//struct hgsl_timeline *timeline;

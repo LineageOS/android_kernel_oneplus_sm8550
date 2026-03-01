@@ -108,6 +108,8 @@ struct csiphy_device {
 	struct regulator_bulk_data *supplies;
 	int num_supplies;
 	struct csiphy_config cfg;
+	struct resources_icc *icc_clk;
+	int nicc_clks;
 	struct v4l2_mbus_framefmt fmt[MSM_CSIPHY_PADS_NUM];
 	const struct csiphy_subdev_resources *res;
 	struct csiphy_device_regs *regs;

@@ -159,6 +159,8 @@ struct csid_device {
 	int nclocks;
 	struct regulator_bulk_data *supplies;
 	int num_supplies;
+	struct resources_icc *icc_clk;
+	int nicc_clks;
 	struct completion reset_complete;
 	struct csid_testgen_config testgen;
 	struct csid_phy_config phy;

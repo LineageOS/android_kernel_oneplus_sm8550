@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 #include <linux/compat.h>
 #include <linux/fs.h>
@@ -267,6 +267,11 @@ struct compat_fastrpc_ioctl_capability {
 	compat_uint_t capability;
 };
 
+struct comapt_fastrpc_proc_sharedbuf_info {
+	compat_int_t buf_fd;
+	compat_int_t buf_size;
+};
+
 static int compat_get_fastrpc_ioctl_invoke(
 			struct compat_fastrpc_ioctl_invoke_async __user *inv32,
 			struct fastrpc_ioctl_invoke_async *inv,
@@ -473,6 +478,25 @@ static int compat_get_fastrpc_ioctl_invoke2(
 		memcpy(&inv2_user->size, &size, sizeof(size));
 		if (err)
 			goto bail;
+		break;
+	}
+	case FASTRPC_INVOKE2_PROC_SHAREDBUF_INFO:
+	{
+		VERIFY(err,
+		sizeof(struct comapt_fastrpc_proc_sharedbuf_info) >= size);
+		if (err) {
+			err = -EBADE;
+			goto bail;
+		}
+		VERIFY(err, NULL != (inv2_user = kzalloc(
+							sizeof(*inv2_user), GFP_KERNEL)));
+		if (err) {
+			err = -EFAULT;
+			goto bail;
+		}
+		memcpy(&inv2_user->req, &req, sizeof(req));
+		memcpy(&inv2_user->invparam, &pparam, sizeof(pparam));
+		memcpy(&inv2_user->size, &size, sizeof(size));
 		break;
 	}
 	default:

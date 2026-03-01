@@ -945,6 +945,8 @@ static int vfe_set_clock_rates(struct vfe_device *vfe)
 	u64 pixel_clock[VFE_LINE_NUM_MAX];
 	int i, j;
 	int ret;
+	u32 curr_rate;
+	u32 perf_rate;
 
 	for (i = VFE_LINE_RDI0; i < vfe->res->line_num; i++) {
 		ret = camss_get_pixel_clock(&vfe->line[i].subdev.entity,
@@ -955,6 +957,7 @@ static int vfe_set_clock_rates(struct vfe_device *vfe)
 
 	for (i = 0; i < vfe->nclocks; i++) {
 		struct camss_clock *clock = &vfe->clock[i];
+		curr_rate = clk_get_rate(clock->clk);
 
 		if (vfe_match_clock_names(vfe, clock) && vfe_check_clock_levels(clock)) {
 			u64 min_rate = 0;
@@ -1015,6 +1018,18 @@ static int vfe_set_clock_rates(struct vfe_device *vfe)
 
 			dev_dbg(dev, "%s Clock: %s, Level: %d", __func__, clock->name, perf_level);
 			clk_set_rate(clock->clk, clock->freq[perf_level]);
+			perf_rate = clock->freq[perf_level];
+		}
+	}
+
+	/* FIXME: Temporary solution, should be reworked at all */
+	for (i = 0; i < vfe->nicc_clks; i++) {
+		u32 avg = 400000000, peak = vfe->icc_clk[i].icc_bw_tbl.peak;
+
+		ret = camss_icc_set_clk(vfe->camss, vfe->icc_clk[i].name, avg, peak);
+		if (ret < 0) {
+			dev_err(dev, "icc clk set rate failed: %d\n", ret);
+			return ret;
 		}
 	}
 
@@ -1802,30 +1817,32 @@ int msm_vfe_subdev_init(struct camss *camss, struct vfe_device *vfe,
 
 	/* Power domain */
 
-	if (res->vfe.pd_name) {
-		vfe->genpd = dev_pm_domain_attach_by_name(camss->dev,
-							  res->vfe.pd_name);
-		if (IS_ERR(vfe->genpd)) {
-			ret = PTR_ERR(vfe->genpd);
-			return ret;
+	if (camss->res->version != CAMSS_8550GEN2) {
+		if (res->vfe.pd_name) {
+			vfe->genpd = dev_pm_domain_attach_by_name(camss->dev,
+								  res->vfe.pd_name);
+			if (IS_ERR(vfe->genpd)) {
+				ret = PTR_ERR(vfe->genpd);
+				return ret;
+			}
 		}
-	}
 
-	if (!vfe->genpd && res->vfe.has_pd) {
-		/*
-		 * Legacy magic index.
-		 * Requires
-		 * power-domain = <VFE_X>,
-		 *                <VFE_Y>,
-		 *                <TITAN_TOP>
-		 * id must correspondng to the index of the VFE which must
-		 * come before the TOP GDSC. VFE Lite has no individually
-		 * collapasible domain which is why id < vfe_num is a valid
-		 * check.
-		 */
-		vfe->genpd = dev_pm_domain_attach_by_id(camss->dev, id);
-		if (IS_ERR(vfe->genpd))
-			return PTR_ERR(vfe->genpd);
+		if (!vfe->genpd && res->vfe.has_pd) {
+			/*
+			 * Legacy magic index.
+			 * Requires
+			 * power-domain = <VFE_X>,
+			 *                <VFE_Y>,
+			 *                <TITAN_TOP>
+			 * id must correspondng to the index of the VFE which must
+			 * come before the TOP GDSC. VFE Lite has no individually
+			 * collapasible domain which is why id < vfe_num is a valid
+			 * check.
+			 */
+			vfe->genpd = dev_pm_domain_attach_by_id(camss->dev, id);
+			if (IS_ERR(vfe->genpd))
+				return PTR_ERR(vfe->genpd);
+		}
 	}
 
 	/* Memory */
@@ -1890,6 +1907,24 @@ int msm_vfe_subdev_init(struct camss *camss, struct vfe_device *vfe,
 
 		for (j = 0; j < clock->nfreqs; j++)
 			clock->freq[j] = res->clock_rate[i][j];
+	}
+
+	/* ICC CLK */
+	vfe->nicc_clks = 0;
+	for (i = 0; i < camss->res->icc_path_num; i++)
+		if (camss->res->icc_res[i].client == ICC_VFE)
+			vfe->nicc_clks++;
+
+	vfe->icc_clk = devm_kcalloc(dev, vfe->nicc_clks, sizeof(*vfe->icc_clk), GFP_KERNEL);
+	if (!vfe->icc_clk)
+		return -ENOMEM;
+
+	for (i = 0, j = 0; i < camss->res->icc_path_num; i++) {
+		if (camss->res->icc_res[i].client == ICC_VFE) {
+			vfe->icc_clk[j] = camss->res->icc_res[i];
+			dev_dbg(camss->dev, "%s: icc clk %s\n", __func__, vfe->icc_clk[j].name);
+			j++;
+		}
 	}
 
 	mutex_init(&vfe->power_lock);

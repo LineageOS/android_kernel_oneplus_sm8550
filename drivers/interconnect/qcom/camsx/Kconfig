@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config INTERCONNECT_QCOM_CAMSX
+       tristate "Qualcomm camera-kernel/camss icc bridge driver"
+       depends on INTERCONNECT_QCOM
+       select INTERCONNECT_CLK
+       help
+         Middle man to help manage common resources shared by camss
+         and camera kernel. Such resources currently include:
+         CPAS, clocks and NoC.
+
+         Select M to build this as module.

@@ -541,6 +541,8 @@ static int csid_set_clock_rates(struct csid_device *csid)
 	s64 link_freq;
 	int i, j;
 	int ret;
+	u32 curr_rate;
+	u32 perf_rate;
 
 	fmt = csid_get_fmt_entry(csid->res->formats->formats, csid->res->formats->nformats,
 				 csid->fmt[MSM_CSIPHY_PAD_SINK].code);
@@ -551,6 +553,7 @@ static int csid_set_clock_rates(struct csid_device *csid)
 
 	for (i = 0; i < csid->nclocks; i++) {
 		struct camss_clock *clock = &csid->clock[i];
+		curr_rate = clk_get_rate(clock->clk);
 
 		if (!strcmp(clock->name, "csi0") ||
 		    !strcmp(clock->name, "csi1") ||
@@ -592,9 +595,18 @@ static int csid_set_clock_rates(struct csid_device *csid)
 			}
 		} else if (clock->nfreqs) {
 			u32 perf_level = min(camss_get_perf_level(csid->camss), clock->nfreqs - 1);
-
-			dev_dbg(dev, "%s Clock: %s, Level: %d", __func__, clock->name, perf_level);
 			clk_set_rate(clock->clk, clock->freq[perf_level]);
+			perf_rate = clock->freq[perf_level];
+		}
+	}
+
+	for (i = 0; i < csid->nicc_clks; i++) {
+		u32 avg = link_freq, peak = link_freq;
+
+		ret = camss_icc_set_clk(csid->camss, csid->icc_clk[i].name, avg, peak);
+		if (ret < 0) {
+			dev_err(dev, "icc clk set rate failed: %d\n", ret);
+			return ret;
 		}
 	}
 
@@ -740,6 +752,7 @@ static int csid_set_power(struct v4l2_subdev *sd, int on)
 
 		csid->res->hw_ops->hw_version(csid);
 	} else {
+		csid->res->hw_ops->reset(csid);
 		disable_irq(csid->irq);
 		camss_disable_clocks(csid->nclocks, csid->clock);
 		regulator_bulk_disable(csid->num_supplies,
@@ -1189,6 +1202,25 @@ int msm_csid_subdev_init(struct camss *camss, struct csid_device *csid,
 
 		for (j = 0; j < clock->nfreqs; j++)
 			clock->freq[j] = res->clock_rate[i][j];
+	}
+
+	/* ICC CLK */
+	csid->nicc_clks = 0;
+	for (i = 0; i < camss->res->icc_path_num; i++)
+		if (camss->res->icc_res[i].client == ICC_CSID)
+			csid->nicc_clks++;
+
+	csid->icc_clk = devm_kcalloc(dev,
+				     csid->nicc_clks, sizeof(*csid->icc_clk),
+				     GFP_KERNEL);
+	if (!csid->icc_clk)
+		return -ENOMEM;
+
+	for (i = 0, j = 0; i < camss->res->icc_path_num; i++) {
+		if (camss->res->icc_res[i].client == ICC_CSID) {
+			csid->icc_clk[j] = camss->res->icc_res[i];
+			j++;
+		}
 	}
 
 	/* Regulator */

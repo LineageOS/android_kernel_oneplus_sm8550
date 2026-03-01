@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/bitops.h>
@@ -737,8 +737,12 @@ static void tm_handler_work(struct work_struct *work)
 				continue;
 			}
 			pr_debug("notifying thermal, temp:%d\n", temp);
+
+			mutex_lock(&adc->lock);
 			chan_prop->last_temp = temp;
 			chan_prop->last_temp_set = true;
+			mutex_unlock(&adc->lock);
+
 			thermal_zone_device_update(chan_prop->tzd, THERMAL_TRIP_VIOLATED);
 		}
 	}
@@ -814,7 +818,7 @@ static const struct iio_info adc5_gen3_info = {
 /* Used by thermal clients to read ADC channel temperature */
 int adc_tm_gen3_get_temp(void *data, int *temp)
 {
-	int ret;
+	int ret = 0;
 	struct adc5_channel_prop *prop = data;
 	struct adc5_chip *adc;
 	u16 adc_code_volt;
@@ -826,18 +830,21 @@ int adc_tm_gen3_get_temp(void *data, int *temp)
 
 	if (prop->last_temp_set) {
 		pr_debug("last_temp: %d\n", prop->last_temp);
+		mutex_lock(&adc->lock);
 		prop->last_temp_set = false;
 		*temp = prop->last_temp;
-		return 0;
+		mutex_unlock(&adc->lock);
+	} else {
+		ret = adc5_gen3_do_conversion(adc, prop, &adc_code_volt);
+		if (ret < 0)
+			return ret;
+
+		ret = qcom_adc5_hw_scale(prop->scale_fn_type,
+			prop->prescale, adc->data,
+			adc_code_volt, temp);
+		if (ret < 0)
+			return ret;
 	}
-
-	ret = adc5_gen3_do_conversion(adc, prop, &adc_code_volt);
-	if (ret < 0)
-		return ret;
-
-	ret = qcom_adc5_hw_scale(prop->scale_fn_type,
-		prop->prescale, adc->data,
-		adc_code_volt, temp);
 
 	/* Save temperature data to minidump */
 	if (prop->chip->adc_md != NULL && prop->tzd)
@@ -1794,12 +1801,16 @@ static int adc5_gen3_exit(struct platform_device *pdev)
 	u8 data = 0;
 	int i, sdam_index;
 
-	mutex_lock(&adc->lock);
+	if (adc->n_tm_channels)
+		cancel_work_sync(&adc->tm_handler_work);
+
 	for (i = 0; i < adc->nchannels; i++) {
 		if (adc->chan_props[i].req_wq)
 			destroy_workqueue(adc->chan_props[i].req_wq);
 		adc->chan_props[i].timer = MEAS_INT_DISABLE;
 	}
+
+	mutex_lock(&adc->lock);
 
 	/* Disable all available channels */
 	for (i = 0; i < adc->num_sdams * 8; i++) {
@@ -1816,9 +1827,6 @@ static int adc5_gen3_exit(struct platform_device *pdev)
 	}
 
 	mutex_unlock(&adc->lock);
-
-	if (adc->n_tm_channels)
-		cancel_work_sync(&adc->tm_handler_work);
 
 	mutex_destroy(&adc->lock);
 

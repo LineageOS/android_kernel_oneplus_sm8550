@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022,2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 #ifndef __HGSL_UTILS_H
 #define __HGSL_UTILS_H
@@ -95,6 +95,31 @@ static inline void hgsl_log(unsigned int level, const char * const fun,
 	va_end(arglist);
 
 	pr_err("%s\n", buffer);
+}
+
+static inline int hgsl_check_userparams(
+	uint64_t uaddr64,
+	uint32_t usize)
+{
+	unsigned long uaddr, size, end;
+
+	if (!uaddr64 || !usize)
+		return -EINVAL;
+
+	uaddr = (unsigned long)untagged_addr(uaddr64);
+	size = (unsigned long)usize;
+
+	/* Check for integer overflow */
+	if (uaddr > ULONG_MAX - size)
+		return -EINVAL;
+
+	end = uaddr + size;
+
+	/* Quick check user addr limit */
+	if (uaddr >= user_addr_max() || end > user_addr_max())
+		return -EFAULT;
+
+	return 0;
 }
 
 #endif  /* __HGSL_UTILS_H */

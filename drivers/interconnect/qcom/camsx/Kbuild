@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+camsx-objs += \
+	camsx-core.o \
+	icc-camsx.o \
+	icc-camsx-clk.o \
+	icc-camsx-cpas.o
+
+obj-$(CONFIG_INTERCONNECT_QCOM_CAMSX) += camsx.o

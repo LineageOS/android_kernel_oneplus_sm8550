@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 /* Uncomment this block to log an error on every VERIFY failure */
@@ -1683,6 +1683,20 @@ static int overlap_ptr_cmp(const void *a, const void *b)
 	return st == 0 ? ed : st;
 }
 
+/**
+ * context_build_overlap - Detect and handle buffer overlaps in RPC args
+ * @ctx: The invoke context containing buffer information
+ *
+ * This function detects overlapping memory regions in the RPC arguments and
+ * adjusts the memory mapping accordingly. It handles ION and non-ION buffers
+ * separately to prevent incorrect overlap detection between different buf types.
+ * For each buffer type:
+ * - If a buffer overlaps with a previous buffer of the same type, it adjusts
+ *   the mapping to avoid the overlap
+ * - If no overlap is detected, it uses the full buffer range
+ *
+ * Return: 0 on success, error code on failure
+ */
 static int context_build_overlap(struct smq_invoke_ctx *ctx)
 {
 	int i, err = 0;
@@ -1690,7 +1704,9 @@ static int context_build_overlap(struct smq_invoke_ctx *ctx)
 	int inbufs = REMOTE_SCALARS_INBUFS(ctx->sc);
 	int outbufs = REMOTE_SCALARS_OUTBUFS(ctx->sc);
 	int nbufs = inbufs + outbufs;
-	struct overlap max;
+	struct overlap max_nonion;
+	struct overlap max_ion;
+	struct overlap *max;
 
 	for (i = 0; i < nbufs; ++i) {
 		ctx->overs[i].start = (uintptr_t)lpra[i].buf.pv;
@@ -1710,21 +1726,29 @@ static int context_build_overlap(struct smq_invoke_ctx *ctx)
 		ctx->overps[i] = &ctx->overs[i];
 	}
 	sort(ctx->overps, nbufs, sizeof(*ctx->overps), overlap_ptr_cmp, NULL);
-	max.start = 0;
-	max.end = 0;
+	max_nonion.start = 0;
+	max_nonion.end = 0;
+	max_ion.start = 0;
+	max_ion.end = 0;
+	max_nonion.raix = -1;
+	max_ion.raix = -1;
 	for (i = 0; i < nbufs; ++i) {
-		if (ctx->overps[i]->start < max.end) {
-			ctx->overps[i]->mstart = max.end;
+		int raix = ctx->overps[i]->raix;
+		/* Separate ION and non-ION buffers; fd <= 0 indicates non-ION */
+		max = (ctx->fds && ctx->fds[raix] > 0) ? &max_ion : &max_nonion;
+		if (ctx->overps[i]->start < max->end) {
+			ctx->overps[i]->mstart = max->end;
 			ctx->overps[i]->mend = ctx->overps[i]->end;
-			ctx->overps[i]->offset = max.end -
+			ctx->overps[i]->offset = max->end -
 				ctx->overps[i]->start;
-			if (ctx->overps[i]->end > max.end) {
-				max.end = ctx->overps[i]->end;
+			if (ctx->overps[i]->end > max->end) {
+				max->end = ctx->overps[i]->end;
+				max->raix = raix;
 			} else {
-				if ((max.raix < inbufs &&
+				if ((max->raix < inbufs &&
 					ctx->overps[i]->raix + 1 > inbufs) ||
 					(ctx->overps[i]->raix < inbufs &&
-					max.raix + 1 > inbufs))
+					max->raix + 1 > inbufs))
 					ctx->overps[i]->do_cmo = 1;
 				ctx->overps[i]->mend = 0;
 				ctx->overps[i]->mstart = 0;
@@ -1733,7 +1757,7 @@ static int context_build_overlap(struct smq_invoke_ctx *ctx)
 			ctx->overps[i]->mend = ctx->overps[i]->end;
 			ctx->overps[i]->mstart = ctx->overps[i]->start;
 			ctx->overps[i]->offset = 0;
-			max = *ctx->overps[i];
+			*max = *ctx->overps[i];
 		}
 	}
 bail:
@@ -8471,6 +8495,7 @@ static struct platform_driver fastrpc_driver = {
 union fastrpc_dev_param {
 	struct fastrpc_dev_map_dma *map;
 	struct fastrpc_dev_unmap_dma *unmap;
+	struct fastrpc_dev_get_hlos_pid *hpid;
 };
 
 long fastrpc_dev_map_dma(struct fastrpc_device *dev, unsigned long invoke_param)
@@ -8604,6 +8629,35 @@ bail:
 	return err;
 }
 
+long fastrpc_dev_get_hlos_pid(struct fastrpc_device *dev, unsigned long invoke_param)
+{
+	int err = 0;
+	union fastrpc_dev_param p;
+	struct fastrpc_file *fl = NULL;
+	struct fastrpc_apps *me = &gfa;
+	unsigned long irq_flags = 0;
+
+	p.hpid = (struct fastrpc_dev_get_hlos_pid *)invoke_param;
+	spin_lock_irqsave(&me->hlock, irq_flags);
+	/* Verify if fastrpc device is closed*/
+	VERIFY(err, dev && !dev->dev_close);
+	if (err) {
+		err = -ESRCH;
+		spin_unlock_irqrestore(&me->hlock, irq_flags);
+		return err;
+	}
+	fl = dev->fl;
+	/* Verify if fastrpc file is not NULL*/
+	if (!fl) {
+		err = -EBADF;
+		spin_unlock_irqrestore(&me->hlock, irq_flags);
+		return err;
+	}
+	p.hpid->hlos_pid = fl->tgid;
+	spin_unlock_irqrestore(&me->hlock, irq_flags);
+	return err;
+}
+
 long fastrpc_driver_invoke(struct fastrpc_device *dev, unsigned int invoke_num,
 								unsigned long invoke_param)
 {
@@ -8615,6 +8669,9 @@ long fastrpc_driver_invoke(struct fastrpc_device *dev, unsigned int invoke_num,
 		break;
 	case FASTRPC_DEV_UNMAP_DMA:
 		err = fastrpc_dev_unmap_dma(dev, invoke_param);
+		break;
+	case FASTRPC_DEV_GET_HLOS_PID:
+		err = fastrpc_dev_get_hlos_pid(dev, invoke_param);
 		break;
 	default:
 		err = -ENOTTY;
