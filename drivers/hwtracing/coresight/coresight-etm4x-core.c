@@ -2038,9 +2038,11 @@ static int etm4_probe(struct device *dev, void __iomem *base, u32 etm_pid)
 	if (fwnode_property_present(dev_fwnode(dev), "qcom,skip-power-up"))
 		drvdata->skip_power_up = true;
 
+	cpus_read_lock();
 	if (smp_call_function_single(drvdata->cpu,
 				etm4_init_arch_data,  &init_arg, 1))
 		dev_err(dev, "ETM arch init failed\n");
+	cpus_read_unlock();
 
 	if (!drvdata->arch)
 		return -EINVAL;
