@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2024-2025, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  */
 
@@ -302,7 +302,7 @@ static int lt8711uxe2_gpio_configure(struct lt8711uxe2 *pdata, bool on)
 		}
 
 		ret = gpio_direction_output(pdata->reset_gpio,
-				LT8711UXE2_GPIO_HIGH);
+				LT8711UXE2_GPIO_LOW);
 		if (ret) {
 			dev_err(pdata->dev, "lt8711uxe2 reset gpio direction failed\n");
 			goto reset_err;
@@ -1304,35 +1304,35 @@ static int lt8711uxe2_probe(struct i2c_client *client,
 
 	mutex_init(&pdata->mutex);
 
-	if (gpio_is_valid(pdata->cc_finished_gpio))
-		lt8711uxe2_reset(pdata, false);
-	else
+	if (!gpio_is_valid(pdata->cc_finished_gpio)) {
 		lt8711uxe2_reset(pdata, true);
 
-	ret = lt8711uxe2_read_firmware_version(pdata);
-	if (ret)
-		dev_warn(pdata->dev,
-		"failed to read fw version, not checking fw up to date\n");
+		ret = lt8711uxe2_read_firmware_version(pdata);
+		if (ret)
+			dev_err(pdata->dev, "failed to read fw version\n");
 
-	dev_info(pdata->dev, "chip firmware version: %#06x\n",
-				pdata->chip_fw_version);
-	dev_info(pdata->dev, "image firmware version: %#06x\n",
-				pdata->image_fw_version);
-	/* determine if firmware upgrade is needed, only accept exact version */
-	if (pdata->image_fw_version > pdata->chip_fw_version) {
-		dev_info(pdata->dev, "Upgrading fw %#06x => %#06x\n",
-					pdata->chip_fw_version,
+		dev_info(pdata->dev, "chip firmware version: %#06x\n",
+					pdata->chip_fw_version);
+		dev_info(pdata->dev, "image firmware version: %#06x\n",
 					pdata->image_fw_version);
-		ret = request_firmware_nowait(THIS_MODULE, true,
-					"lt8711uxe2_fw.bin", &client->dev,
-					GFP_KERNEL, pdata,
-					lt8711uxe2_fw_cb_main);
-		if (ret) {
-			dev_err(pdata->dev,
-				"Failed to invoke firmware loader: %d\n", ret);
-		}
-	} else
-		dev_info(pdata->dev, "firmware up-to-date\n");
+		/* determine if firmware upgrade is needed, only accept exact version */
+		if (pdata->image_fw_version > pdata->chip_fw_version) {
+			dev_info(pdata->dev, "Upgrading fw %#06x => %#06x\n",
+						pdata->chip_fw_version,
+						pdata->image_fw_version);
+			ret = request_firmware_nowait(THIS_MODULE, true,
+						"lt8711uxe2_fw.bin",
+						&client->dev,
+						GFP_KERNEL, pdata,
+						lt8711uxe2_fw_cb_main);
+			if (ret) {
+				dev_err(pdata->dev,
+					"Failed to invoke firmware loader: %d\n",
+					ret);
+			}
+		} else
+			dev_info(pdata->dev, "firmware up-to-date\n");
+	}
 
 	(void)sysfs_create_group(&client->dev.kobj, &lt8711uxe2_attr_group);
 
@@ -1391,10 +1391,15 @@ static int lt8711uxe2_probe(struct i2c_client *client,
 	lt8711uxe2_check_state(pdata);
 	lt8711uxe2_read_alt_mode(pdata);
 
-	ret = lt8711uxe2_read_alt_mode(pdata);
-	if (!ret) {
-		lt8711uxe2_set_hdmi_switch_state(pdata,
-			!!(pdata->alt_mode & BIT(0)));
+	if (!gpio_is_valid(pdata->cc_finished_gpio)) {
+		lt8711uxe2_check_state(pdata);
+		lt8711uxe2_read_alt_mode(pdata);
+
+		ret = lt8711uxe2_read_alt_mode(pdata);
+		if (!ret) {
+			lt8711uxe2_set_hdmi_switch_state(pdata,
+				!!(pdata->alt_mode & BIT(0)));
+		}
 	}
 
 	/* Make sure LT8711UXE2 initialized, then enable irq. */
