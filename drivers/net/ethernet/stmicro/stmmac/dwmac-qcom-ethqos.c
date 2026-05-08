@@ -278,7 +278,7 @@ void dwmac_qcom_program_avb_algorithm(struct stmmac_priv *priv,
 		(struct dwmac_qcom_avb_algorithm *)req->ptr;
 	struct dwmac_qcom_avb_algorithm_params *avb_params;
 
-	ETHQOSDBG("\n");
+	ETHQOSDBG("enter\n");
 
 	if (copy_from_user(&l_avb_struct, (void __user *)u_avb_struct,
 			   sizeof(struct dwmac_qcom_avb_algorithm)))
@@ -316,7 +316,7 @@ void dwmac_qcom_program_avb_algorithm(struct stmmac_priv *priv,
 	   priv->plat->tx_queues_cfg[l_avb_struct.qinx].low_credit,
 	   l_avb_struct.qinx);
 
-	ETHQOSDBG("\n");
+	ETHQOSDBG("exit\n");
 }
 
 unsigned int dwmac_qcom_get_plat_tx_coal_frames(struct sk_buff *skb)
