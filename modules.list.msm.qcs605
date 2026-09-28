@@ -71,7 +71,6 @@ qcom_aoss.ko
 msm_qmp.ko
 tmecom-intf.ko
 arm_smmu.ko
-mem-offline.ko
 sdhci-msm.ko
 nvme-core.ko
 nvme.ko
